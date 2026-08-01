@@ -1,0 +1,20 @@
+# Managed runtime inputs and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.json
+!package.json
+
+# Cloudflare named-tunnel material
+cloudflared/
+tunnel/
+
+# Generated output and test artifacts
+artifacts/
+playwright-report/
+test-results/
+.tmp/
