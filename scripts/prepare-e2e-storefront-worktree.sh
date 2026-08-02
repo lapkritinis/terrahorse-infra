@@ -2,7 +2,9 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source=${E2E_STOREFRONT_SOURCE_REPO:?E2E_STOREFRONT_SOURCE_REPO is required}
-sha=${E2E_STOREFRONT_SHA:?E2E_STOREFRONT_SHA is required}
+ref=${E2E_STOREFRONT_REF:-HEAD}
+sha=$(git -C "$source" rev-parse --verify "$ref^{commit}")
+export E2E_STOREFRONT_SHA="$sha"
 case "$sha" in [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) echo 'E2E_STOREFRONT_SHA must be a full lowercase SHA.' >&2; exit 1;; esac
 git -C "$source" cat-file -e "$sha^{commit}"
 target="$root/.tmp/worktrees/storefront-$sha"
