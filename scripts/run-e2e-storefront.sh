@@ -2,6 +2,12 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+state_dir="$root/.tmp/e2e-run"
+mkdir -p "$state_dir"
+lock="$state_dir/owner"
+test ! -e "$lock" || { echo 'Existing E2E run-state lock; refusing concurrent or stale ownership.' >&2; exit 1; }
+umask 077
+printf '%s\n' "$$" > "$lock"
 runtime_env=${E2E_RUNTIME_ENV_FILE:?E2E_RUNTIME_ENV_FILE is required}
 secret_env=${E2E_SECRET_ENV_FILE:?E2E_SECRET_ENV_FILE is required}
 web_root=$("$root/scripts/prepare-e2e-storefront-worktree.sh")
@@ -42,12 +48,26 @@ cd "$web_root"
 test "$(git rev-parse HEAD)" = "$revision" || { printf '%s\n' 'Unexpected E2E worktree revision.' >&2; exit 1; }
 compose="docker compose --project-name terrahorse-web-e2e --env-file $runtime_env --env-file $secret_env -f compose.yml -f compose.preview.yml -f $root/compose.e2e.yml"
 $compose config --quiet
-$compose up -d --build --wait --wait-timeout 90
-test "$(curl -sS --max-time 10 http://127.0.0.1:4100/health | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const x=JSON.parse(s);process.exit(x.environment==="preview"&&x.version===process.env.APP_VERSION?0:1)})" = "" || exit 1
-config=${E2E_TUNNEL_CONFIG_FILE:?E2E_TUNNEL_CONFIG_FILE is required}
 pid=${E2E_TUNNEL_PID_FILE:?E2E_TUNNEL_PID_FILE is required}
-cloudflared tunnel --config "$config" --pidfile "$pid" run "$(node -e 'const fs=require("fs");process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1])).TunnelID)' "${E2E_TUNNEL_CREDENTIALS_FILE:?E2E_TUNNEL_CREDENTIALS_FILE is required}") >/dev/null 2>&1 &
 uuid=$(node -e 'const fs=require("fs");process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1])).TunnelID)' "$E2E_TUNNEL_CREDENTIALS_FILE")
+cleanup() {
+  code=$?
+  trap - EXIT INT TERM
+  if test -r "$pid"; then
+    owned_pid=$(cat "$pid")
+    if kill -0 "$owned_pid" 2>/dev/null && ps -p "$owned_pid" -o command= | grep -q "cloudflared.*$uuid"; then kill "$owned_pid" 2>/dev/null || true; fi
+    rm -f "$pid"
+  fi
+  test "${started_by_this_invocation:-false}" = true && $compose down --remove-orphans >/dev/null 2>&1 || true
+  rm -f "$lock"
+  exit "$code"
+}
+trap cleanup EXIT INT TERM
+$compose up -d --build --wait --wait-timeout 90
+started_by_this_invocation=true
+curl -sS --max-time 10 http://127.0.0.1:4100/health | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const x=JSON.parse(s);process.exit(x.environment==="preview"&&x.version===process.env.APP_VERSION?0:1)})'
+config=${E2E_TUNNEL_CONFIG_FILE:?E2E_TUNNEL_CONFIG_FILE is required}
+cloudflared tunnel --config "$config" --pidfile "$pid" run "$(node -e 'const fs=require("fs");process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1])).TunnelID)' "${E2E_TUNNEL_CREDENTIALS_FILE:?E2E_TUNNEL_CREDENTIALS_FILE is required}") >/dev/null 2>&1 &
 ready=false
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
   test -r "$pid" && kill -0 "$(cat "$pid")" 2>/dev/null && cloudflared tunnel info "$uuid" 2>/dev/null | grep -q '^CONNECTOR ID' && ready=true && break
@@ -55,3 +75,5 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
 done
 test "$ready" = true || { echo 'E2E tunnel connector did not become ready.' >&2; exit 1; }
 "$root/scripts/verify-e2e-boundary.sh"
+trap - EXIT INT TERM
+rm -f "$lock"
