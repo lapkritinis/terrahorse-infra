@@ -1,0 +1,9 @@
+services:
+  storefront:
+    build:
+      args:
+        APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
+    environment:
+      APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
+    ports: !override
+      - '127.0.0.1:4100:3000'
