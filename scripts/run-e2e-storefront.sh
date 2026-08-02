@@ -2,10 +2,10 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-web_root=${E2E_WEB_ROOT:-"$root/../terrahorse-web-e2e"}
-runtime_env=${E2E_RUNTIME_ENV_FILE:-"$root/../terrahorse-web/.env.preview"}
-secret_env=${E2E_SECRET_ENV_FILE:-"$root/../terrahorse-web/.env.e2e"}
-revision=06a106e712bfabe8d731c582493c12c58415e44a
+runtime_env=${E2E_RUNTIME_ENV_FILE:?E2E_RUNTIME_ENV_FILE is required}
+secret_env=${E2E_SECRET_ENV_FILE:?E2E_SECRET_ENV_FILE is required}
+revision=${E2E_STOREFRONT_SHA:?E2E_STOREFRONT_SHA is required}
+web_root=$("$root/scripts/prepare-e2e-storefront-worktree.sh")
 
 missing=''
 for file in "$runtime_env" "$secret_env"; do
@@ -35,7 +35,7 @@ export SALEOR_COMMERCE_APP_TOKEN="$SALEOR_E2E_ADMIN_TOKEN"
 export APP_VERSION="$revision"
 
 cd "$web_root"
-test "$(git rev-parse HEAD)" = "$revision" || { printf '%s\n' 'Unexpected E2E web revision.' >&2; exit 1; }
+test "$(git rev-parse HEAD)" = "$revision" || { printf '%s\n' 'Unexpected E2E worktree revision.' >&2; exit 1; }
 compose="docker compose --project-name terrahorse-web-e2e --env-file $runtime_env --env-file $secret_env -f compose.yml -f compose.preview.yml -f $root/compose.e2e.yml"
 $compose config --quiet
 $compose up -d --build --wait --wait-timeout 90
