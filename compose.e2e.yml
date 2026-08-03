@@ -1,10 +1,139 @@
+x-saleor-environment: &saleor-environment
+  ALLOWED_HOSTS: saleor-api,localhost,127.0.0.1
+  CACHE_URL: redis://saleor-redis:6379/0
+  CELERY_BROKER_URL: redis://saleor-redis:6379/1
+  DATABASE_URL: postgres://saleor:${SALEOR_DATABASE_PASSWORD:?SALEOR_DATABASE_PASSWORD is required}@saleor-db:5432/saleor
+  DEFAULT_CHANNEL_SLUG: terrahorse-e2e
+  DEFAULT_FROM_EMAIL: noreply@terrahorse.invalid
+  EMAIL_URL: consolemail://
+  HTTP_IP_FILTER_ENABLED: 'False'
+  OTEL_SDK_DISABLED: 'true'
+  PUBLIC_URL: http://localhost:8000/
+  SEND_USAGE_TELEMETRY: 'False'
+  SECRET_KEY: ${SALEOR_SECRET_KEY:?SALEOR_SECRET_KEY is required}
+
 services:
+  saleor-db:
+    image: postgres:15.18-alpine3.23
+    environment:
+      POSTGRES_DB: saleor
+      POSTGRES_PASSWORD: ${SALEOR_DATABASE_PASSWORD:?SALEOR_DATABASE_PASSWORD is required}
+      POSTGRES_USER: saleor
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U saleor -d saleor]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - saleor-db:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  saleor-redis:
+    image: redis:7.4.10-alpine3.21
+    command: [redis-server, --save, '', --appendonly, 'no']
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  saleor-setup:
+    image: ghcr.io/saleor/saleor:3.23.17
+    profiles: [setup]
+    command: [sh, -c, 'python manage.py migrate --noinput && python /e2e/saleor-e2e.py seed']
+    environment:
+      <<: *saleor-environment
+      E2E_RUN_STATE_DIR: /e2e/run
+      E2E_PAYMENT_OPERATION: /e2e/payment-ownership.graphql
+      SALEOR_PAYMENT_WEBHOOK_SECRET: ${SALEOR_PAYMENT_WEBHOOK_SECRET:?SALEOR_PAYMENT_WEBHOOK_SECRET is required}
+    depends_on:
+      saleor-db:
+        condition: service_healthy
+      saleor-redis:
+        condition: service_healthy
+    volumes:
+      - ${E2E_INFRA_ROOT:?E2E_INFRA_ROOT is required}/scripts/saleor-e2e.py:/e2e/saleor-e2e.py:ro
+      - ${E2E_STOREFRONT_WORKTREE:?E2E_STOREFRONT_WORKTREE is required}/server/data/saleor/graphql/operations/payment-ownership.graphql:/e2e/payment-ownership.graphql:ro
+      - ${E2E_RUN_STATE_DIR:?E2E_RUN_STATE_DIR is required}:/e2e/run
+    restart: 'no'
+
+  saleor-api:
+    image: ghcr.io/saleor/saleor:3.23.17
+    environment: *saleor-environment
+    depends_on:
+      saleor-db:
+        condition: service_healthy
+      saleor-redis:
+        condition: service_healthy
+    expose:
+      - '8000'
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json,urllib.request;
+          r=urllib.request.Request('http://127.0.0.1:8000/graphql/',
+          data=b'{"query":"{__typename}"}',headers={'content-type':'application/json'});
+          assert json.load(urllib.request.urlopen(r,timeout=3))['data']['__typename']=='Query'
+      interval: 3s
+      timeout: 5s
+      start_period: 10s
+      retries: 30
+    restart: unless-stopped
+
+  saleor-worker:
+    image: ghcr.io/saleor/saleor:3.23.17
+    command: [celery, --app, saleor.celeryconf:app, worker, -E, --loglevel, info, --concurrency, '2']
+    environment: *saleor-environment
+    depends_on:
+      saleor-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  saleor-beat:
+    image: ghcr.io/saleor/saleor:3.23.17
+    command: [celery, --app, saleor.celeryconf:app, beat, --scheduler, saleor.schedulers.schedulers.DatabaseScheduler, --loglevel, info]
+    environment: *saleor-environment
+    depends_on:
+      saleor-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  saleor-verify:
+    image: ghcr.io/saleor/saleor:3.23.17
+    profiles: [verify]
+    command: [python, /e2e/saleor-e2e.py, verify]
+    environment:
+      <<: *saleor-environment
+      E2E_PAYMENT_OPERATION: /e2e/payment-ownership.graphql
+      E2E_RUNTIME_ENV_FILE: /e2e/run/runtime.env
+      SALEOR_E2E_API_URL: http://saleor-api:8000/graphql/
+    depends_on:
+      saleor-api:
+        condition: service_healthy
+    volumes:
+      - ${E2E_INFRA_ROOT:?E2E_INFRA_ROOT is required}/scripts/saleor-e2e.py:/e2e/saleor-e2e.py:ro
+      - ${E2E_STOREFRONT_WORKTREE:?E2E_STOREFRONT_WORKTREE is required}/server/data/saleor/graphql/operations/payment-ownership.graphql:/e2e/payment-ownership.graphql:ro
+      - ${E2E_RUN_STATE_DIR:?E2E_RUN_STATE_DIR is required}:/e2e/run:ro
+    restart: 'no'
+
   storefront:
     build:
       args:
         APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
     environment:
       APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
+      CATALOG_SOURCE: saleor
+      SALEOR_API_URL: http://saleor-api:8000/graphql/
+      SALEOR_CHANNEL: terrahorse-e2e
+      SALEOR_STOCK_AVAILABILITY_MODE: channel-aggregate
+      SALEOR_STOCK_COUNTRY_CODE: LT
+    depends_on:
+      saleor-api:
+        condition: service_healthy
     ports: !override
       - '127.0.0.1:4100:3000'
 
@@ -21,3 +150,6 @@ services:
       storefront:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  saleor-db:
