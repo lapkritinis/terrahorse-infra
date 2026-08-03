@@ -66,7 +66,8 @@ scripts/run-e2e-storefront.sh
 
 The run creates no Montonio Order and performs no browser payment. A failed
 start removes only Compose project `terrahorse-web-e2e`, its volumes, and its
-generated `.e2e-run/` state.
+generated `.e2e-run/` state after confirming teardown. If teardown is
+incomplete, owner state is retained for the project-scoped stop command.
 
 Standalone public verification while the project is running uses the resolved
 SHA from the owner record:

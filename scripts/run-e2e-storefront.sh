@@ -79,9 +79,14 @@ compose_full() {
 cleanup() {
   code=$?
   trap - EXIT INT TERM
-  compose_base down --volumes --remove-orphans >/dev/null 2>&1 || \
-    printf '%s\n' 'Project cleanup failed; run the documented project-scoped stop command.' >&2
-  case "$state" in "$root/.e2e-run") rm -rf "$state" ;; *) fail 'Refusing unexpected run-state cleanup target.' ;; esac
+  if compose_base down --volumes --remove-orphans >/dev/null 2>&1 &&
+    remaining_containers=$(docker ps -aq --filter label=com.docker.compose.project=terrahorse-web-e2e) &&
+    remaining_volumes=$(docker volume ls -q --filter label=com.docker.compose.project=terrahorse-web-e2e) &&
+    test -z "$remaining_containers" && test -z "$remaining_volumes"; then
+    case "$state" in "$root/.e2e-run") rm -rf "$state" ;; *) fail 'Refusing unexpected run-state cleanup target.' ;; esac
+  else
+    printf '%s\n' 'Project cleanup incomplete; owner state retained for project-scoped recovery.' >&2
+  fi
   exit "$code"
 }
 trap cleanup EXIT

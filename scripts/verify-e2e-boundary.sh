@@ -48,7 +48,31 @@ product=$(mktemp)
 cart=$(mktemp)
 checkout=$(mktemp)
 cookies=$(mktemp)
-trap 'rm -f "$product" "$cart" "$checkout" "$cookies"' EXIT INT TERM
+checkout_clean=false
+delete_checkout() {
+  test "$checkout_clean" = false || return 0
+  checkout_cookie=$(awk '$6 == "__Host-terrahorse-checkout" { print $7 }' "$cookies")
+  test -n "$checkout_cookie" || return 0
+  checkout_id=$(node -e 'process.stdout.write(decodeURIComponent(process.argv[1]))' "$checkout_cookie") || return 1
+  container=$(docker ps --filter label=com.docker.compose.project=terrahorse-web-e2e \
+    --filter label=com.docker.compose.service=storefront --format '{{.ID}}')
+  test -n "$container" && test "$(printf '%s\n' "$container" | wc -l | tr -d ' ')" = 1 || return 1
+  docker exec "$container" node -e 'const id=process.argv[1];const call=async(query)=>{const r=await fetch(process.env.SALEOR_API_URL,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${process.env.SALEOR_COMMERCE_APP_TOKEN}`},body:JSON.stringify({query,variables:{id}})});const x=await r.json();if(!r.ok||x.errors?.length)process.exit(1);return x.data};(async()=>{const d=await call("mutation($id:ID!){checkoutDelete(id:$id){errors{code}}}");if(d.checkoutDelete.errors.length)process.exit(1);const q=await call("query($id:ID!){checkout(id:$id){id}}");if(q.checkout)process.exit(1)})().catch(()=>process.exit(1))' "$checkout_id" || return 1
+  checkout_clean=true
+}
+cleanup_checkout() {
+  code=$?
+  trap - EXIT INT TERM
+  if ! delete_checkout; then
+    printf '%s\n' 'Storefront verification checkout cleanup failed.' >&2
+    code=1
+  fi
+  rm -f "$product" "$cart" "$checkout" "$cookies"
+  exit "$code"
+}
+trap cleanup_checkout EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 product_url=https://e2e.terrahorse.lt/api/catalog/product/lt/terrahorse-e2e-test-product
 product_code=$(curl -sS --max-time 10 -o "$product" -w '%{http_code}' "$product_url")
 test "$product_code" = 200 || fail 'Seeded product did not cross the public storefront boundary.'
@@ -64,15 +88,9 @@ checkout_code=$(curl -sS --max-time 10 -c "$cookies" -b "$cookies" -o "$checkout
 test "$checkout_code" = 200 || fail 'Storefront checkout reread failed.'
 node -e 'const x=JSON.parse(require("node:fs").readFileSync(process.argv[1]));const line=x.cart?.lines?.[0];process.exit(x.cart?.quantity===1&&line?.variant?.sku==="TH-E2E-TEST-001"&&line?.unitPrice?.amount==="10.00"&&line?.unitPrice?.currency==="EUR"?0:1)' "$checkout" || \
   fail 'Storefront checkout reread did not contain the seeded product.'
-checkout_id=$(awk '$6 == "__Host-terrahorse-checkout" { print $7 }' "$cookies")
-test -n "$checkout_id" || fail 'Storefront checkout cookie was not recorded.'
-checkout_id=$(node -e 'process.stdout.write(decodeURIComponent(process.argv[1]))' "$checkout_id")
-
-container=$(docker ps --filter label=com.docker.compose.project=terrahorse-web-e2e \
-  --filter label=com.docker.compose.service=storefront --format '{{.ID}}')
-test -n "$container" && test "$(printf '%s\n' "$container" | wc -l | tr -d ' ')" = 1 || \
-  fail 'Expected exactly one running E2E storefront container.'
-docker exec "$container" node -e 'const id=process.argv[1];const call=async(query)=>{const r=await fetch(process.env.SALEOR_API_URL,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${process.env.SALEOR_COMMERCE_APP_TOKEN}`},body:JSON.stringify({query,variables:{id}})});const x=await r.json();if(!r.ok||x.errors?.length)process.exit(1);return x.data};(async()=>{const d=await call("mutation($id:ID!){checkoutDelete(id:$id){errors{code}}}");if(d.checkoutDelete.errors.length)process.exit(1);const q=await call("query($id:ID!){checkout(id:$id){id}}");if(q.checkout)process.exit(1)})().catch(()=>process.exit(1))' "$checkout_id" || \
+test -n "$(awk '$6 == "__Host-terrahorse-checkout" { print $7 }' "$cookies")" || \
+  fail 'Storefront checkout cookie was not recorded.'
+delete_checkout || \
   fail 'Storefront verification checkout cleanup failed.'
 rm -f "$product" "$cart" "$checkout" "$cookies"
 trap - EXIT INT TERM

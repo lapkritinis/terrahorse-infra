@@ -35,9 +35,11 @@ docker compose --project-name terrahorse-web-e2e \
   --env-file "$state/saleor.env" --env-file "$state/runtime.env" \
   -f "$web_root/compose.yml" -f "$web_root/compose.preview.yml" -f "$root/compose.e2e.yml" \
   --profile tunnel --profile setup --profile verify down --volumes --remove-orphans
-test -z "$(docker ps -aq --filter label=com.docker.compose.project=terrahorse-web-e2e)" || \
+remaining_containers=$(docker ps -aq --filter label=com.docker.compose.project=terrahorse-web-e2e)
+test -z "$remaining_containers" || \
   fail 'E2E project containers remain after stop.'
-test -z "$(docker volume ls -q --filter label=com.docker.compose.project=terrahorse-web-e2e)" || \
+remaining_volumes=$(docker volume ls -q --filter label=com.docker.compose.project=terrahorse-web-e2e)
+test -z "$remaining_volumes" || \
   fail 'E2E project volumes remain after stop.'
 find "$state" -mindepth 1 -maxdepth 1 -type f ! -name owner ! -name saleor.env ! -name runtime.env | grep -q . && \
   fail 'Unexpected generated state file; refusing removal.'
