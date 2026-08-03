@@ -10,7 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, "/app")
 
-EXPECTED_PERMISSIONS = {"HANDLE_PAYMENTS", "HANDLE_CHECKOUTS", "MANAGE_CHECKOUTS"}
+EXPECTED_PERMISSIONS = {
+    "HANDLE_PAYMENTS", "HANDLE_CHECKOUTS", "MANAGE_CHECKOUTS", "MANAGE_ORDERS",
+}
 PRODUCT_SLUG = "terrahorse-e2e-test-product"
 SKU = "TH-E2E-TEST-001"
 WEBHOOK_NAME = "TerraHorse transaction initialize"
