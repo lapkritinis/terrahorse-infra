@@ -9,10 +9,10 @@ tunnel.
 
 The setup step migrates an empty database, creates the minimal
 `terrahorse-e2e` channel/catalogue/warehouse/LT-shipping fixture, and creates
-one active runtime app with exactly `HANDLE_PAYMENTS`, `HANDLE_CHECKOUTS`, and
-`MANAGE_CHECKOUTS`. Its generated token and resolved Saleor IDs exist only in
-ignored owner-only `.e2e-run/` state. No Dashboard token or external Saleor
-instance is used.
+one active runtime app with exactly `HANDLE_PAYMENTS`, `HANDLE_CHECKOUTS`,
+`MANAGE_CHECKOUTS`, and `MANAGE_ORDERS`. Its generated token and resolved
+Saleor IDs exist only in ignored owner-only `.e2e-run/` state. No Dashboard
+token or external Saleor instance is used.
 
 ## Protected external inputs
 
