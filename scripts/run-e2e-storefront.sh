@@ -26,16 +26,17 @@ set -a
 . "$secret_env"
 set +a
 missing=''
-for name in SALEOR_PAYMENT_WEBHOOK_SECRET MONTONIO_ACCESS_KEY MONTONIO_SECRET_KEY COMMERCE_EVENT_HMAC_KEY; do
+# CI audits this exact external-input contract.
+for name in MONTONIO_ACCESS_KEY MONTONIO_SECRET_KEY COMMERCE_EVENT_HMAC_KEY; do
   eval "value=\${$name-}"
   test -n "$value" || missing="$missing $name"
 done
 test -z "$missing" || fail "Missing required external names:$missing"
-test "${#SALEOR_PAYMENT_WEBHOOK_SECRET}" -ge 32 || fail 'SALEOR_PAYMENT_WEBHOOK_SECRET must be at least 32 characters.'
 test "${#COMMERCE_EVENT_HMAC_KEY}" -ge 32 || fail 'COMMERCE_EVENT_HMAC_KEY must be at least 32 characters.'
-unset SALEOR_API_URL SALEOR_E2E_ADMIN_TOKEN SALEOR_COMMERCE_APP_TOKEN SALEOR_PAYMENT_APP_ID \
+unset SALEOR_API_URL SALEOR_COMMERCE_APP_TOKEN SALEOR_PAYMENT_APP_ID \
   SALEOR_PAYMENT_GATEWAY_ID SALEOR_VENIPAK_PARCEL_LOCKER_METHOD_ID \
-  SALEOR_VENIPAK_COURIER_METHOD_ID SALEOR_CHANNEL SALEOR_STOCK_AVAILABILITY_MODE \
+  SALEOR_VENIPAK_COURIER_METHOD_ID SALEOR_PAYMENT_WEBHOOK_SECRET \
+  SALEOR_CHANNEL SALEOR_STOCK_AVAILABILITY_MODE \
   SALEOR_STOCK_COUNTRY_CODE CATALOG_SOURCE
 test ! -e "$state" || fail 'An E2E boundary is already owned; stop it before starting another.'
 
@@ -48,13 +49,15 @@ export E2E_INFRA_ROOT="$root" E2E_RUN_STATE_DIR="$state" E2E_STOREFRONT_WORKTREE
 
 database_password=$(openssl rand -hex 32)
 saleor_secret=$(openssl rand -hex 64)
+payment_webhook_secret=$(openssl rand -hex 32)
 printf '%s\n' \
   "APP_VERSION=$revision" \
   "E2E_INFRA_ROOT=$root" \
   "E2E_RUN_STATE_DIR=$state" \
   "E2E_STOREFRONT_WORKTREE=$web_root" \
   "SALEOR_DATABASE_PASSWORD=$database_password" \
-  "SALEOR_SECRET_KEY=$saleor_secret" > "$state/saleor.env"
+  "SALEOR_SECRET_KEY=$saleor_secret" \
+  "SALEOR_PAYMENT_WEBHOOK_SECRET=$payment_webhook_secret" > "$state/saleor.env"
 printf '%s\n' "$revision" "$web_root" "$runtime_env" "$secret_env" "$config" "$credentials" > "$state/owner"
 chmod 600 "$state/saleor.env" "$state/owner"
 set -a

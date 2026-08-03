@@ -167,6 +167,7 @@ def seed():
         )
 
     write_runtime({
+        "SALEOR_API_URL": "http://saleor-api:8000/graphql/",
         "SALEOR_COMMERCE_APP_TOKEN": token,
         "SALEOR_PAYMENT_APP_ID": graphene.Node.to_global_id("App", app.pk),
         "SALEOR_PAYMENT_GATEWAY_ID": app.identifier,

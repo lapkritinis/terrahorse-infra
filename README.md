@@ -11,7 +11,7 @@ The setup step migrates an empty database, creates the minimal
 `terrahorse-e2e` channel/catalogue/warehouse/LT-shipping fixture, and creates
 one active runtime app with exactly `HANDLE_PAYMENTS`, `HANDLE_CHECKOUTS`, and
 `MANAGE_CHECKOUTS`. Its generated token and resolved Saleor IDs exist only in
-ignored owner-only `.e2e-run/` state. No Dashboard token or shared Saleor
+ignored owner-only `.e2e-run/` state. No Dashboard token or external Saleor
 instance is used.
 
 ## Protected external inputs
@@ -20,8 +20,8 @@ Keep both env files and the dedicated tunnel files outside Git as owner-only
 `0600` regular files. They contain only external configuration:
 
 - runtime environment: optional Montonio endpoint overrides;
-- secret environment: `MONTONIO_ACCESS_KEY`, `MONTONIO_SECRET_KEY`,
-  `SALEOR_PAYMENT_WEBHOOK_SECRET`, and `COMMERCE_EVENT_HMAC_KEY`;
+- secret environment: `MONTONIO_ACCESS_KEY`, `MONTONIO_SECRET_KEY`, and
+  `COMMERCE_EVENT_HMAC_KEY`;
 - the existing `terrahorse-e2e` tunnel config and credential JSON.
 
 Export their paths with the storefront source and friendly ref:
@@ -96,5 +96,6 @@ scripts/cleanup-e2e-storefront-worktree.sh
 
 Stop never changes the existing `e2e.terrahorse.lt` Cloudflare DNS record,
 named tunnel, connector credentials, or noindex rule. It also never changes any
-shared or production Saleor resource. Removal of those external Cloudflare
-resources remains a separately authorized, exact-identity owner action.
+external Saleor or production resource. Removal of legacy external Saleor and
+Cloudflare resources remains a separately authorized, exact-identity owner
+action.
