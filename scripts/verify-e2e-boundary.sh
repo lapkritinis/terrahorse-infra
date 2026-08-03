@@ -44,6 +44,39 @@ check_noindex https://e2e.terrahorse.lt/ 302
 check_noindex https://e2e.terrahorse.lt/lt 200
 check_noindex https://e2e.terrahorse.lt/health 200
 
+product=$(mktemp)
+cart=$(mktemp)
+checkout=$(mktemp)
+cookies=$(mktemp)
+trap 'rm -f "$product" "$cart" "$checkout" "$cookies"' EXIT INT TERM
+product_url=https://e2e.terrahorse.lt/api/catalog/product/lt/terrahorse-e2e-test-product
+product_code=$(curl -sS --max-time 10 -o "$product" -w '%{http_code}' "$product_url")
+test "$product_code" = 200 || fail 'Seeded product did not cross the public storefront boundary.'
+variant_id=$(node -e 'const x=JSON.parse(require("node:fs").readFileSync(process.argv[1]));const v=x.purchaseOptions?.find(v=>v.sku==="TH-E2E-TEST-001");if(!v?.available||!v.priceLabel?.includes("10,00"))process.exit(1);process.stdout.write(v.variantId)' "$product") || \
+  fail 'Seeded product identity did not survive the storefront mapping.'
+cart_code=$(curl -sS --max-time 10 -c "$cookies" -b "$cookies" -o "$cart" -w '%{http_code}' \
+  -H 'Content-Type: application/json' -H 'Origin: https://e2e.terrahorse.lt' \
+  --data "{\"variantId\":\"$variant_id\",\"quantity\":1}" \
+  https://e2e.terrahorse.lt/api/cart/lt/lines)
+test "$cart_code" = 200 || fail 'Storefront could not create a checkout from the seeded product.'
+checkout_code=$(curl -sS --max-time 10 -c "$cookies" -b "$cookies" -o "$checkout" -w '%{http_code}' \
+  https://e2e.terrahorse.lt/api/checkout/lt)
+test "$checkout_code" = 200 || fail 'Storefront checkout reread failed.'
+node -e 'const x=JSON.parse(require("node:fs").readFileSync(process.argv[1]));const line=x.cart?.lines?.[0];process.exit(x.cart?.quantity===1&&line?.variant?.sku==="TH-E2E-TEST-001"&&line?.unitPrice?.amount==="10.00"&&line?.unitPrice?.currency==="EUR"?0:1)' "$checkout" || \
+  fail 'Storefront checkout reread did not contain the seeded product.'
+checkout_id=$(awk '$6 == "__Host-terrahorse-checkout" { print $7 }' "$cookies")
+test -n "$checkout_id" || fail 'Storefront checkout cookie was not recorded.'
+checkout_id=$(node -e 'process.stdout.write(decodeURIComponent(process.argv[1]))' "$checkout_id")
+
+container=$(docker ps --filter label=com.docker.compose.project=terrahorse-web-e2e \
+  --filter label=com.docker.compose.service=storefront --format '{{.ID}}')
+test -n "$container" && test "$(printf '%s\n' "$container" | wc -l | tr -d ' ')" = 1 || \
+  fail 'Expected exactly one running E2E storefront container.'
+docker exec "$container" node -e 'const id=process.argv[1];const call=async(query)=>{const r=await fetch(process.env.SALEOR_API_URL,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${process.env.SALEOR_COMMERCE_APP_TOKEN}`},body:JSON.stringify({query,variables:{id}})});const x=await r.json();if(!r.ok||x.errors?.length)process.exit(1);return x.data};(async()=>{const d=await call("mutation($id:ID!){checkoutDelete(id:$id){errors{code}}}");if(d.checkoutDelete.errors.length)process.exit(1);const q=await call("query($id:ID!){checkout(id:$id){id}}");if(q.checkout)process.exit(1)})().catch(()=>process.exit(1))' "$checkout_id" || \
+  fail 'Storefront verification checkout cleanup failed.'
+rm -f "$product" "$cart" "$checkout" "$cookies"
+trap - EXIT INT TERM
+
 request_id="e2e-boundary-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 headers=$(mktemp)
 trap 'rm -f "$headers"' EXIT INT TERM
@@ -58,10 +91,6 @@ fi
 rm -f "$headers"
 trap - EXIT INT TERM
 
-container=$(docker ps --filter label=com.docker.compose.project=terrahorse-web-e2e \
-  --filter label=com.docker.compose.service=storefront --format '{{.ID}}')
-test -n "$container" && test "$(printf '%s\n' "$container" | wc -l | tr -d ' ')" = 1 || \
-  fail 'Expected exactly one running E2E storefront container.'
 docker logs --since 2m "$container" 2>&1 | \
   grep -F "\"requestId\":\"$request_id\"" | \
   grep -Fq '"path":"/api/payments/montonio/callback"' || \
