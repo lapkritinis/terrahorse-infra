@@ -18,3 +18,7 @@ artifacts/
 playwright-report/
 test-results/
 .tmp/
+.e2e-run
+
+# Finder metadata
+.DS_Store

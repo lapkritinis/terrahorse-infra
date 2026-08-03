@@ -1,0 +1,23 @@
+services:
+  storefront:
+    build:
+      args:
+        APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
+    environment:
+      APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
+    ports: !override
+      - '127.0.0.1:4100:3000'
+
+  cloudflared:
+    profiles: [tunnel]
+    image: cloudflare/cloudflared:2026.7.3
+    command: [tunnel, --no-autoupdate, --config, /etc/cloudflared/config.yml, run]
+    volumes:
+      - ${E2E_TUNNEL_CONFIG_FILE:?E2E_TUNNEL_CONFIG_FILE is required}:/etc/cloudflared/config.yml:ro
+      - ${E2E_TUNNEL_CREDENTIALS_FILE:?E2E_TUNNEL_CREDENTIALS_FILE is required}:/etc/cloudflared/credentials.json:ro
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      storefront:
+        condition: service_healthy
+    restart: unless-stopped
