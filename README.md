@@ -1,72 +1,63 @@
 # TerraHorse Infrastructure
 
-This repository owns environment-level TerraHorse operations. Its first scoped capability is the non-production E2E boundary at `e2e.terrahorse.lt`. Application runtime contracts remain in the sibling `terrahorse-web` repository.
+This repository owns the non-production E2E boundary at `e2e.terrahorse.lt`. It uses only the `terrahorse-e2e` Saleor app, channel, catalogue, warehouse, shipping zone and delivery method. It never changes `terrahorse.lt`, `www`, a production tunnel or production Saleor resources.
 
-## Retained E2E boundary
-
-The boundary uses only the `terrahorse-e2e` Saleor channel, app, catalogue, warehouse, shipping zone and delivery method. The storefront runs as Compose project `terrahorse-web-e2e` on loopback port `4100`, behind the dedicated `terrahorse-e2e` named tunnel. Cloudflare adds `X-Robots-Tag: noindex, nofollow` for the exact `e2e.terrahorse.lt` hostname. No Montonio Order or payment is created by these scripts.
-
-The default operational state is stopped. A successful start retains `.e2e-run` as the owner-only active-run lock and runs Cloudflared under the dedicated macOS user launch label `terrahorse-e2e-cloudflared` until the matching stop succeeds. Existing, stale or conflicting state is refused and is never removed automatically.
+Compose project `terrahorse-web-e2e` owns both the production-built storefront on loopback port `4100` and the dedicated Cloudflared connector. Cloudflare adds `X-Robots-Tag: noindex, nofollow` for this hostname. Provisioning creates no Montonio Order or payment.
 
 ## Protected inputs
 
-Keep the runtime environment, secret environment, tunnel configuration and tunnel credentials outside Git as regular, non-symlink files owned by the current user with mode `0600`. The tunnel config must name the dedicated UUID, its dedicated credentials file, `e2e.terrahorse.lt -> http://127.0.0.1:4100`, and a final `http_status:404` catch-all. Set these paths and the storefront source before running commands:
+Keep both env files, the dedicated tunnel config and its credentials outside Git as owner-only `0600` files:
 
 ```sh
 export E2E_STOREFRONT_SOURCE_REPO=/absolute/path/to/terrahorse-web
 export E2E_STOREFRONT_REF=origin/main
 export E2E_RUNTIME_ENV_FILE=/protected/path/runtime.env
 export E2E_SECRET_ENV_FILE=/protected/path/secrets.env
-export E2E_TUNNEL_CONFIG_FILE=/protected/path/config.yml
+export E2E_TUNNEL_CONFIG_FILE=/protected/path/terrahorse-e2e.yml
 export E2E_TUNNEL_CREDENTIALS_FILE=/protected/path/terrahorse-e2e.json
-export E2E_TUNNEL_PID_FILE=/protected/path/terrahorse-e2e.pid
 ```
 
-The runtime and secret files together must provide the names checked by `scripts/run-e2e-storefront.sh`. Values must never be printed or copied into this repository. The launcher derives `SALEOR_PAYMENT_APP_ID` from the authenticated E2E app rather than trusting a stale configured ID. It resolves the friendly storefront ref once, creates/reuses only the clean detached `.tmp/worktrees/storefront-<sha>` worktree, verifies and rewrites the permanent Saleor webhook contract, validates Compose without rendering resolved configuration, starts the storefront, proves local health, then starts Cloudflared and proves the public boundary.
+The tunnel config is intentionally exact and contains no other ingress:
+
+```yaml
+tunnel: <dedicated-tunnel-uuid>
+credentials-file: /etc/cloudflared/credentials.json
+loglevel: info
+ingress:
+  - hostname: e2e.terrahorse.lt
+    service: http://host.docker.internal:4100
+  - service: http_status:404
+```
 
 ## Start, verify and stop
+
+Start resolves the friendly storefront ref once, reuses a clean detached ignored worktree, derives the authenticated E2E Saleor app ID, installs and rereads the permanent webhook, and writes one ignored owner record before Compose starts both services:
 
 ```sh
 E2E_WEBHOOK_INSTALL_CONFIRM=terrahorse-e2e scripts/run-e2e-storefront.sh
 ```
 
-While the managed boundary is active, standalone public verification uses the immutable revision retained in `.e2e-run/revision`:
+Standalone verification uses that record:
 
 ```sh
-export E2E_STOREFRONT_SHA=$(sed -n '1p' .e2e-run/revision)
+export E2E_STOREFRONT_SHA=$(sed -n '1p' .e2e-run)
 scripts/verify-e2e-boundary.sh
-set -a
-. "$E2E_RUNTIME_ENV_FILE"
-. "$E2E_SECRET_ENV_FILE"
-set +a
-case "$SALEOR_API_URL" in
-  http://host.docker.internal:*) export SALEOR_E2E_API_URL="http://127.0.0.1:${SALEOR_API_URL#http://host.docker.internal:}" ;;
-  *) export SALEOR_E2E_API_URL="$SALEOR_API_URL" ;;
-esac
-E2E_SALEOR_VERIFY=saleor-e2e node scripts/verify-e2e-saleor.mjs
 ```
 
-The public verifier is read-only with respect to Cloudflare. It requires an active connector, exact public health revision/environment, exact response statuses plus the host-wide noindex header, and a request-correlated storefront access log for the empty callback rejection. It never calls `cloudflared tunnel route dns` and makes no callback-authentication claim.
+The read-only verifier requires an active connector, exact public revision/environment, route-specific status and noindex headers, and a matching storefront access-log request ID for the empty callback rejection. It makes no callback-authentication claim.
 
-Stop reads the exact persisted SHA, worktree, Compose inputs, tunnel UUID/config and PID; it does not resolve the friendly ref again:
+Stop removes both services as one project and deletes the owner record only after Compose succeeds:
 
 ```sh
 E2E_STOP_CONFIRM=terrahorse-e2e scripts/stop-e2e-storefront.sh
 ```
 
-After stop, remove only the exact detached worktree with its immutable SHA:
+After stop, remove only the exact detached worktree with `E2E_STOREFRONT_SHA=<full-sha> E2E_WORKTREE_CLEANUP_CONFIRM=terrahorse-e2e scripts/cleanup-e2e-storefront-worktree.sh`.
+
+If start is interrupted, run the same project-scoped stop and retry:
 
 ```sh
-export E2E_STOREFRONT_SHA=<full-40-character-sha>
-E2E_WORKTREE_CLEANUP_CONFIRM=terrahorse-e2e scripts/cleanup-e2e-storefront-worktree.sh
+E2E_STOP_CONFIRM=terrahorse-e2e scripts/stop-e2e-storefront.sh
 ```
 
-## Refusal-only ownership diagnostic
-
-The local identity cannot perform an exact read-only Cloudflare DNS-record lookup, so automated rollback is intentionally unavailable. The diagnostic validates only facts it can read and never changes DNS, tunnels or Saleor:
-
-```sh
-E2E_DIAGNOSTIC_CONFIRM=terrahorse-e2e scripts/diagnose-e2e-ownership.sh
-```
-
-If removal is approved, the owner must first stop the managed runtime, then use the Cloudflare dashboard: delete only the `e2e.terrahorse.lt` DNS record after confirming it targets `<exact UUID>.cfargotunnel.com`; then delete only the `terrahorse-e2e` tunnel after confirming the same UUID. Retain Saleor audit records unless a separate reviewed, resource-ID-scoped cleanup task authorizes their removal. Never alter `terrahorse.lt`, `www`, a root/production tunnel, or production Saleor resources.
+The local identity cannot read the exact Cloudflare DNS record, so automatic rollback is unavailable. Approved removal remains an owner dashboard action: confirm the exact UUID, delete only the `e2e.terrahorse.lt` record targeting it, then delete only the `terrahorse-e2e` tunnel. Saleor audit records remain unless a separate resource-ID-scoped task authorizes removal.
