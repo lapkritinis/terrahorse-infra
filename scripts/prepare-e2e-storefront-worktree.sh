@@ -12,6 +12,6 @@ if test -e "$target"; then
   test "$(git -C "$target" rev-parse HEAD)" = "$sha" || { echo 'Managed worktree SHA mismatch.' >&2; exit 1; }
 else
   mkdir -p "$root/.tmp/worktrees"
-  git -C "$source" worktree add --detach "$target" "$sha"
+  git -C "$source" worktree add --detach "$target" "$sha" >&2
 fi
 printf '%s\n' "$target"
