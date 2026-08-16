@@ -14,6 +14,27 @@ locals {
       MONTONIO_SHIPPING_API_URL              = "https://sandbox-shipping.montonio.com"
       SALEOR_VENIPAK_PARCEL_LOCKER_METHOD_ID = "U2hpcHBpbmdNZXRob2Q6Mg=="
       SALEOR_VENIPAK_COURIER_METHOD_ID       = "U2hpcHBpbmdNZXRob2Q6Mw=="
+      SALEOR_PUBLIC_URL                      = "https://api.terrahorse.lt"
+      STOREFRONT_PUBLIC_URL                  = "https://dev.terrahorse.lt"
+      SALEOR_ALLOWED_HOSTS                   = "localhost,127.0.0.1,api,dev.terrahorse.lt,api.terrahorse.lt"
+      SALEOR_ALLOWED_CLIENT_HOSTS            = "localhost,127.0.0.1,dev.terrahorse.lt"
+    }
+    "aws-prod" = {
+      NUXT_PUBLIC_SITE_URL                   = "https://terrahorse.lt"
+      SALEOR_API_URL                         = "https://api.terrahorse.lt/graphql/"
+      SALEOR_CHANNEL                         = "terrahorse-eur"
+      SALEOR_STOCK_AVAILABILITY_MODE         = "channel-aggregate"
+      SALEOR_STOCK_COUNTRY_CODE              = "LT"
+      LOG_LEVEL                              = "info"
+      SALEOR_PAYMENT_GATEWAY_ID              = "terrahorse.local-commerce"
+      SALEOR_PAYMENT_APP_ID                  = "QXBwOjI="
+      MONTONIO_SHIPPING_API_URL              = "https://sandbox-shipping.montonio.com"
+      SALEOR_VENIPAK_PARCEL_LOCKER_METHOD_ID = "U2hpcHBpbmdNZXRob2Q6Mg=="
+      SALEOR_VENIPAK_COURIER_METHOD_ID       = "U2hpcHBpbmdNZXRob2Q6Mw=="
+      SALEOR_PUBLIC_URL                      = "https://api.terrahorse.lt"
+      STOREFRONT_PUBLIC_URL                  = "https://terrahorse.lt"
+      SALEOR_ALLOWED_HOSTS                   = "localhost,127.0.0.1,api,terrahorse.lt,api.terrahorse.lt"
+      SALEOR_ALLOWED_CLIENT_HOSTS            = "localhost,127.0.0.1,terrahorse.lt"
     }
   }
 
