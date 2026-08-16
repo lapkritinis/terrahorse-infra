@@ -12,6 +12,16 @@ locals {
   }
 }
 
+data "cloudflare_zone" "terrahorse" {
+  filter {
+    name = "terrahorse.lt"
+
+    account {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
 resource "random_password" "cloudflare_tunnel_secret" {
   for_each = local.cloudflare_tunnels
 
@@ -45,6 +55,18 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "terrahorse" {
       },
     ]
   }
+}
+
+resource "cloudflare_dns_record" "terrahorse_tunnel" {
+  for_each = local.cloudflare_tunnels
+
+  zone_id = data.cloudflare_zone.terrahorse.id
+  name    = each.value.hostname
+  type    = "CNAME"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.terrahorse[each.key].id}.cfargotunnel.com"
+  ttl     = 1
+  proxied = true
+  comment = "TerraHorse ${each.key} Cloudflare Tunnel"
 }
 
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "terrahorse" {
