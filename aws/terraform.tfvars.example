@@ -1,7 +1,2 @@
 cloudflare_account_id = "replace-with-cloudflare-account-id"
 cloudflare_api_token  = "replace-with-sensitive-cloudflare-api-token"
-
-cloudflare_tunnel_hostnames = {
-  dev  = "dev.terrahorse.lt"
-  prod = "terrahorse.lt"
-}

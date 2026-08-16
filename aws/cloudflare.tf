@@ -1,8 +1,13 @@
 locals {
+  cloudflare_tunnel_hostnames = {
+    dev  = "dev.terrahorse.lt"
+    prod = "terrahorse.lt"
+  }
+
   cloudflare_tunnels = {
     for environment in ["dev", "prod"] : environment => {
       name     = "terrahorse-${environment}"
-      hostname = var.cloudflare_tunnel_hostnames[environment]
+      hostname = local.cloudflare_tunnel_hostnames[environment]
     }
   }
 }
