@@ -34,15 +34,16 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "terrahorse" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.terrahorse[each.key].id
 
-  config {
-    ingress_rule {
-      hostname = each.value.hostname
-      service  = "http://localhost:3000"
-    }
-
-    ingress_rule {
-      service = "http_status:404"
-    }
+  config = {
+    ingress = [
+      {
+        hostname = each.value.hostname
+        service  = "http://localhost:3000"
+      },
+      {
+        service = "http_status:404"
+      },
+    ]
   }
 }
 

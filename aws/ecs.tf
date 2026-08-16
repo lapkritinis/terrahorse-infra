@@ -25,7 +25,7 @@ resource "aws_cloudwatch_log_group" "ecs" {
 }
 
 resource "aws_ssm_parameter" "cloudflared-tunnel-token" {
-  for_each = local.cloudflared_tunnel_tokens
+  for_each = local.cloudflare_tunnels
 
   name        = "/terrahorse/${each.key}/cloudflared/tunnel-token"
   description = "Cloudflare Tunnel token for the ${each.key} ECS task"
