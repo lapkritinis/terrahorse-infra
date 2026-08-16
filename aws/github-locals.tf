@@ -47,6 +47,7 @@ locals {
       "CLOUDFLARED_TUNNEL_TOKEN",
       "POSTGRES_PASSWORD",
       "SECRET_KEY",
+      "RSA_PRIVATE_KEY",
     ]
     "aws-prod" = [
       "SALEOR_COMMERCE_APP_TOKEN",
@@ -56,6 +57,7 @@ locals {
       "CLOUDFLARED_TUNNEL_TOKEN",
       "POSTGRES_PASSWORD",
       "SECRET_KEY",
+      "RSA_PRIVATE_KEY",
     ]
   }
 
