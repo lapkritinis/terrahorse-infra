@@ -19,10 +19,13 @@ resource "github_actions_environment_variable" "terrahorse-web" {
 }
 
 resource "github_actions_environment_secret" "terrahorse-web" {
-  for_each = local.github_secret_keys
+  for_each = {
+    for key, value in local.github_secret_keys : key => value
+    if value.name == "CLOUDFLARED_TUNNEL_TOKEN"
+  }
 
   repository  = local.github_repository
   environment = github_repository_environment.terrahorse-web[each.value.environment].environment
   secret_name = each.value.name
-  value       = each.value.name == "CLOUDFLARED_TUNNEL_TOKEN" ? data.cloudflare_zero_trust_tunnel_cloudflared_token.terrahorse[trimprefix(each.value.environment, "aws-")].token : local.github_environment_secrets[each.value.environment][each.value.name]
+  value       = data.cloudflare_zero_trust_tunnel_cloudflared_token.terrahorse[trimprefix(each.value.environment, "aws-")].token
 }
