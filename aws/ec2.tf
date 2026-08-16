@@ -32,6 +32,24 @@ resource "aws_vpc_security_group_egress_rule" "ec2-https" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
+resource "aws_vpc_security_group_egress_rule" "ec2-cloudflare-http2" {
+  security_group_id = aws_security_group.ec2.id
+  description       = "Cloudflare Tunnel HTTP/2 egress"
+  ip_protocol       = "tcp"
+  from_port         = 7844
+  to_port           = 7844
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "ec2-cloudflare-quic" {
+  security_group_id = aws_security_group.ec2.id
+  description       = "Cloudflare Tunnel QUIC egress"
+  ip_protocol       = "udp"
+  from_port         = 7844
+  to_port           = 7844
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
 resource "aws_ebs_volume" "data" {
   availability_zone = local.ec2.availability_zone
   encrypted         = true
