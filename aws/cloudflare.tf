@@ -22,10 +22,10 @@ resource "random_password" "cloudflare_tunnel_secret" {
 resource "cloudflare_zero_trust_tunnel_cloudflared" "terrahorse" {
   for_each = local.cloudflare_tunnels
 
-  account_id = var.cloudflare_account_id
-  name       = each.value.name
-  secret     = base64encode(random_password.cloudflare_tunnel_secret[each.key].result)
-  config_src = "cloudflare"
+  account_id    = var.cloudflare_account_id
+  name          = each.value.name
+  tunnel_secret = base64encode(random_password.cloudflare_tunnel_secret[each.key].result)
+  config_src    = "cloudflare"
 }
 
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "terrahorse" {
