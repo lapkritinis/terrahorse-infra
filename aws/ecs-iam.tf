@@ -139,7 +139,7 @@ data "aws_iam_policy_document" "github-actions" {
 
     condition {
       test     = "StringEquals"
-      variable = "ec2:ResourceTag/Name"
+      variable = "ssm:resourceTag/Name"
       values   = [local.ec2.name]
     }
   }
