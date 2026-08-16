@@ -1,11 +1,6 @@
 locals {
   github_repository = "terrahorse-web"
 
-  cloudflared_tunnel_tokens = {
-    dev  = "REPLACE_WITH_DEV_CLOUDFLARED_TUNNEL_TOKEN"
-    prod = "REPLACE_WITH_PROD_CLOUDFLARED_TUNNEL_TOKEN"
-  }
-
   github_environment_variables = {
     "aws-dev" = {
       NUXT_PUBLIC_SITE_URL                   = "http://localhost:3000"

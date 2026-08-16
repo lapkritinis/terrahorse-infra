@@ -30,7 +30,7 @@ resource "aws_ssm_parameter" "cloudflared-tunnel-token" {
   name        = "/terrahorse/${each.key}/cloudflared/tunnel-token"
   description = "Cloudflare Tunnel token for the ${each.key} ECS task"
   type        = "SecureString"
-  value       = each.value
+  value       = data.cloudflare_zero_trust_tunnel_cloudflared_token.terrahorse[each.key].token
 
   tags = {
     Name        = "/terrahorse/${each.key}/cloudflared/tunnel-token"

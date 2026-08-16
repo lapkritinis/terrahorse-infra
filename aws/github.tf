@@ -24,5 +24,5 @@ resource "github_actions_environment_secret" "terrahorse-web" {
   repository  = local.github_repository
   environment = github_repository_environment.terrahorse-web[each.value.environment].environment
   secret_name = each.value.name
-  value       = local.github_environment_secrets[each.value.environment][each.value.name]
+  value       = each.value.name == "CLOUDFLARED_TUNNEL_TOKEN" ? data.cloudflare_zero_trust_tunnel_cloudflared_token.terrahorse[trimprefix(each.value.environment, "aws-")].token : local.github_environment_secrets[each.value.environment][each.value.name]
 }
