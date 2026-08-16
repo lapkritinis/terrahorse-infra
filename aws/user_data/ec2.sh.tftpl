@@ -13,6 +13,13 @@ log() {
 
 log "Docker and Docker Compose installation completed"
 
+cat > /etc/sysctl.d/99-terrahorse-cloudflared.conf <<'SYSCTL'
+net.core.rmem_max=7500000
+net.core.rmem_default=7500000
+SYSCTL
+sysctl --system >/dev/null
+log "Cloudflared UDP receive buffer settings applied"
+
 systemctl enable docker
 usermod -aG docker ec2-user
 
