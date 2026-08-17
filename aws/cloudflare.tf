@@ -4,19 +4,25 @@ locals {
     prod = "terrahorse.lt"
   }
 
+  cloudflare_api_hostnames = {
+    dev  = "api-dev.terrahorse.lt"
+    prod = "api.terrahorse.lt"
+  }
+
   cloudflare_tunnels = {
     for environment in ["dev", "prod"] : environment => {
-      name     = "terrahorse-${environment}"
-      hostname = local.cloudflare_tunnel_hostnames[environment]
+      name         = "terrahorse-${environment}"
+      hostname     = local.cloudflare_tunnel_hostnames[environment]
+      api_hostname = local.cloudflare_api_hostnames[environment]
     }
   }
 }
 
 data "cloudflare_zone" "terrahorse" {
-  filter {
+  filter = {
     name = "terrahorse.lt"
 
-    account {
+    account = {
       id = var.cloudflare_account_id
     }
   }
@@ -51,6 +57,10 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "terrahorse" {
         service  = "http://localhost:3000"
       },
       {
+        hostname = each.value.api_hostname
+        service  = "http://localhost:8000"
+      },
+      {
         service = "http_status:404"
       },
     ]
@@ -67,6 +77,18 @@ resource "cloudflare_dns_record" "terrahorse_tunnel" {
   ttl     = 1
   proxied = true
   comment = "TerraHorse ${each.key} Cloudflare Tunnel"
+}
+
+resource "cloudflare_dns_record" "terrahorse_api_tunnel" {
+  for_each = local.cloudflare_tunnels
+
+  zone_id = data.cloudflare_zone.terrahorse.id
+  name    = each.value.api_hostname
+  type    = "CNAME"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.terrahorse[each.key].id}.cfargotunnel.com"
+  ttl     = 1
+  proxied = true
+  comment = "TerraHorse ${each.key} API Cloudflare Tunnel"
 }
 
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "terrahorse" {
