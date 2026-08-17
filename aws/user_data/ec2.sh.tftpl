@@ -208,6 +208,16 @@ reconcile_once() {
     docker login --username AWS --password-stdin "$${registry}" >/dev/null
   docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" config >/dev/null
   docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" pull >/dev/null
+  docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" up -d db cache >/dev/null
+  database_ready=false
+  for attempt in $(seq 1 30); do
+    if docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" exec -T db pg_isready -U saleor -d saleor >/dev/null 2>&1; then
+      database_ready=true
+      break
+    fi
+    sleep 2
+  done
+  [ "$${database_ready}" = true ]
   docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" run --rm api python3 manage.py migrate --noinput >/dev/null
 
   rollback_dir="$${app_dir}.rollback"
