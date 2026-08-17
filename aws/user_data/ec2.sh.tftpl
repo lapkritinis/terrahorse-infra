@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-dnf install -y awscli-2 docker jq util-linux xfsprogs
+dnf install -y awscli-2 docker jq openssl util-linux xfsprogs
 install -d -m 0755 /usr/local/lib/docker/cli-plugins
 curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64 \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
@@ -105,7 +105,8 @@ fi
 mkdir -p \
   /opt/terrahorse/data/media \
   /opt/terrahorse/data/postgres \
-  /opt/terrahorse/data/redis
+  /opt/terrahorse/data/redis \
+  /opt/terrahorse/data/tls
 
 systemctl start docker
 
@@ -138,6 +139,7 @@ deployment_parameter="/terrahorse/$${environment}/ec2/deploy/deployment"
 status_parameter="/terrahorse/$${environment}/ec2/deploy/status"
 app_dir=/opt/terrahorse/app
 release_dir=/opt/terrahorse/releases
+tls_dir=/opt/terrahorse/data/tls
 reconcile_lock=/run/terrahorse-reconcile.lock
 case "$${environment}" in
   dev) runtime_environment=preview ;;
@@ -151,6 +153,31 @@ write_status() {
   payload="$(jq -cn --arg state "$${state}" --arg release "$${release}" --arg deployment_id "$${deployment_id}" --arg instance_id "$${instance_id}" --arg message "$${message}" \
     '{state:$state,release:$release,deployment_id:$deployment_id,instance_id:$instance_id,message:$message,timestamp:(now|todateiso8601)}')"
   aws ssm put-parameter --name "$${status_parameter}" --type String --overwrite --value "$${payload}" >/dev/null || true
+}
+
+ensure_internal_tls() {
+  local certificate_path="$${tls_dir}/api.crt"
+  local key_path="$${tls_dir}/api.key"
+  local temporary_certificate="$${certificate_path}.tmp"
+  local temporary_key="$${key_path}.tmp"
+
+  install -d -m 0700 "$${tls_dir}"
+  if [ -s "$${certificate_path}" ] && [ -s "$${key_path}" ] && \
+    openssl x509 -in "$${certificate_path}" -noout >/dev/null 2>&1; then
+    return 0
+  fi
+
+  rm -f "$${temporary_certificate}" "$${temporary_key}"
+  umask 077
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
+    -keyout "$${temporary_key}" \
+    -out "$${temporary_certificate}" \
+    -subj '/CN=api' \
+    -addext 'subjectAltName=DNS:api,DNS:localhost,IP:127.0.0.1'
+  chmod 0600 "$${temporary_key}"
+  chmod 0644 "$${temporary_certificate}"
+  mv -f "$${temporary_key}" "$${key_path}"
+  mv -f "$${temporary_certificate}" "$${certificate_path}"
 }
 
 reconcile_once() {
@@ -203,6 +230,7 @@ reconcile_once() {
   aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/RSA_PRIVATE_KEY" --with-decryption --query Parameter.Value --output text >> "$${env_file}"
   printf "'\nCACHE_URL=redis://cache:6379/0\nCELERY_BROKER_URL=redis://cache:6379/1\n" >> "$${env_file}"
   chmod 0600 "$${env_file}"
+  ensure_internal_tls
 
   aws ecr get-login-password --region "$${region}" |
     docker login --username AWS --password-stdin "$${registry}" >/dev/null

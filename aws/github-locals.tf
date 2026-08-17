@@ -5,7 +5,7 @@ locals {
     "aws-dev" = {
       NUXT_PUBLIC_SITE_URL                   = "https://dev.terrahorse.lt"
       NUXT_PUBLIC_I18N_BASE_URL              = "https://dev.terrahorse.lt"
-      SALEOR_API_URL                         = "https://api-dev.terrahorse.lt/graphql/"
+      SALEOR_API_URL                         = "https://api:8443/graphql/"
       SALEOR_CHANNEL                         = "terrahorse-eur"
       SALEOR_STOCK_AVAILABILITY_MODE         = "channel-aggregate"
       SALEOR_STOCK_COUNTRY_CODE              = "LT"
@@ -27,7 +27,7 @@ locals {
     "aws-prod" = {
       NUXT_PUBLIC_SITE_URL                   = "https://terrahorse.lt"
       NUXT_PUBLIC_I18N_BASE_URL              = "https://terrahorse.lt"
-      SALEOR_API_URL                         = "https://api.terrahorse.lt/graphql/"
+      SALEOR_API_URL                         = "https://api:8443/graphql/"
       SALEOR_CHANNEL                         = "terrahorse-eur"
       SALEOR_STOCK_AVAILABILITY_MODE         = "channel-aggregate"
       SALEOR_STOCK_COUNTRY_CODE              = "LT"

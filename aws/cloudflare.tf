@@ -9,11 +9,17 @@ locals {
     prod = "api.terrahorse.lt"
   }
 
+  cloudflare_dashboard_hostnames = {
+    dev  = "dashboard-dev.terrahorse.lt"
+    prod = "dashboard.terrahorse.lt"
+  }
+
   cloudflare_tunnels = {
     for environment in ["dev", "prod"] : environment => {
-      name         = "terrahorse-${environment}"
-      hostname     = local.cloudflare_tunnel_hostnames[environment]
-      api_hostname = local.cloudflare_api_hostnames[environment]
+      name               = "terrahorse-${environment}"
+      hostname           = local.cloudflare_tunnel_hostnames[environment]
+      api_hostname       = local.cloudflare_api_hostnames[environment]
+      dashboard_hostname = local.cloudflare_dashboard_hostnames[environment]
     }
   }
 }
@@ -57,13 +63,20 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "terrahorse" {
         service  = "http://localhost:3000"
       },
       {
+        hostname = each.value.dashboard_hostname
+        service  = "http://localhost:9000"
+      },
+      {
         hostname = each.value.api_hostname
         path     = "/media/.*"
         service  = "http://localhost:8080"
       },
       {
         hostname = each.value.api_hostname
-        service  = "http://localhost:8000"
+        service  = "https://localhost:8443"
+        origin_request = {
+          no_tls_verify = true
+        }
       },
       {
         service = "http_status:404"
@@ -94,6 +107,18 @@ resource "cloudflare_dns_record" "terrahorse-api-tunnel" {
   ttl     = 1
   proxied = true
   comment = "TerraHorse ${each.key} API Cloudflare Tunnel"
+}
+
+resource "cloudflare_dns_record" "terrahorse-dashboard-tunnel" {
+  for_each = local.cloudflare_tunnels
+
+  zone_id = data.cloudflare_zone.terrahorse.id
+  name    = each.value.dashboard_hostname
+  type    = "CNAME"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.terrahorse[each.key].id}.cfargotunnel.com"
+  ttl     = 1
+  proxied = true
+  comment = "TerraHorse ${each.key} Dashboard Cloudflare Tunnel"
 }
 
 moved {
