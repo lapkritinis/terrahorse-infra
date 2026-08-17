@@ -51,24 +51,27 @@ resource "aws_vpc_security_group_egress_rule" "ec2-cloudflare-quic" {
 }
 
 resource "aws_ebs_volume" "data" {
-  availability_zone = local.ec2.availability_zone
+  for_each          = local.ec2_environments
+  availability_zone = each.value.availability_zone
   encrypted         = true
-  size              = local.ec2.data_volume_size_gib
-  type              = local.ec2.data_volume_type
+  size              = each.value.data_volume_size_gib
+  type              = each.value.data_volume_type
 
   lifecycle {
     prevent_destroy = true
   }
 
   tags = {
-    Name = "${local.account_name}-data"
+    Name        = "${each.value.name}-data"
+    Environment = each.key
   }
 }
 
 resource "aws_launch_template" "ec2" {
-  name_prefix   = "${local.ec2.name}-"
+  for_each      = local.ec2_environments
+  name_prefix   = "${each.value.name}-"
   image_id      = data.aws_ami.amazon-linux-2023.id
-  instance_type = local.ec2.instance_type
+  instance_type = each.value.instance_type
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2.name
@@ -80,7 +83,7 @@ resource "aws_launch_template" "ec2" {
     ebs {
       encrypted             = true
       volume_type           = "gp3"
-      volume_size           = local.ec2.root_volume_size_gib
+      volume_size           = each.value.root_volume_size_gib
       delete_on_termination = true
     }
   }
@@ -91,8 +94,9 @@ resource "aws_launch_template" "ec2" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data/ec2.sh.tftpl", {
-    compose_file   = local.ec2.compose_file
-    data_volume_id = aws_ebs_volume.data.id
+    environment    = each.key
+    data_volume_id = aws_ebs_volume.data[each.key].id
+    compose_file   = each.value.compose_file
   }))
 
   tag_specifications {
@@ -100,7 +104,8 @@ resource "aws_launch_template" "ec2" {
 
     tags = merge(
       {
-        Name = local.ec2.name
+        Name        = each.value.name
+        Environment = each.key
       },
       length([
         aws_iam_role_policy_attachment.ec2-ssm.id,
@@ -111,17 +116,18 @@ resource "aws_launch_template" "ec2" {
 }
 
 resource "aws_autoscaling_group" "ec2" {
-  name                = local.ec2.name
-  min_size            = 1
-  desired_capacity    = 1
-  max_size            = 2
-  vpc_zone_identifier = [aws_subnet.dmz[local.ec2.availability_zone].id]
+  for_each            = local.ec2_environments
+  name                = each.value.name
+  min_size            = each.value.min_size
+  desired_capacity    = each.value.desired_capacity
+  max_size            = each.value.max_size
+  vpc_zone_identifier = [aws_subnet.dmz[each.value.availability_zone].id]
 
   health_check_type         = "EC2"
   health_check_grace_period = 900
 
   launch_template {
-    id      = aws_launch_template.ec2.id
+    id      = aws_launch_template.ec2[each.key].id
     version = "$Latest"
   }
 
@@ -137,7 +143,13 @@ resource "aws_autoscaling_group" "ec2" {
 
   tag {
     key                 = "Name"
-    value               = local.ec2.name
+    value               = each.value.name
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = each.key
     propagate_at_launch = true
   }
 }

@@ -98,9 +98,10 @@ data "aws_iam_policy_document" "github-actions" {
   statement {
     sid       = "EcrPush"
     effect    = "Allow"
-    resources = [aws_ecr_repository.terrahorse.arn]
+    resources = [aws_ecr_repository.terrahorse.arn, aws_ecr_repository.terrahorse-release.arn]
 
     actions = [
+      "ecr:BatchGetImage",
       "ecr:BatchCheckLayerAvailability",
       "ecr:CompleteLayerUpload",
       "ecr:InitiateLayerUpload",
@@ -140,7 +141,7 @@ data "aws_iam_policy_document" "github-actions" {
     condition {
       test     = "StringEquals"
       variable = "ssm:resourceTag/Name"
-      values   = [local.ec2.name]
+      values   = [for environment in local.ec2_environments : environment.name]
     }
   }
 
@@ -153,6 +154,15 @@ data "aws_iam_policy_document" "github-actions" {
       "ssm:GetCommandInvocation",
       "ssm:ListCommandInvocations",
     ]
+  }
+
+  statement {
+    sid    = "Ec2DeploymentStatus"
+    effect = "Allow"
+    resources = [
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/terrahorse/*/ec2/deploy/status",
+    ]
+    actions = ["ssm:GetParameter"]
   }
 
   statement {

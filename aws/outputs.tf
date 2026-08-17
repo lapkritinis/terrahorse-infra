@@ -3,6 +3,11 @@ output "ecr_repository_url" {
   value       = aws_ecr_repository.terrahorse.repository_url
 }
 
+output "ecr_release_repository_url" {
+  description = "ECR repository URL for immutable TerraHorse release bundles"
+  value       = aws_ecr_repository.terrahorse-release.repository_url
+}
+
 output "ecs_deploy_targets" {
   description = "ECS names and task template families used by application pipelines"
   value = {
@@ -21,5 +26,5 @@ output "github_actions_role_arn" {
 
 output "ec2_autoscaling_group_name" {
   description = "EC2 Auto Scaling Group name"
-  value       = aws_autoscaling_group.ec2.name
+  value       = { for environment, group in aws_autoscaling_group.ec2 : environment => group.name }
 }

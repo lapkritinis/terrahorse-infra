@@ -54,5 +54,5 @@ resource "aws_backup_selection" "data" {
   name         = "${local.account_name}-data"
   plan_id      = aws_backup_plan.data.id
 
-  resources = [aws_ebs_volume.data.arn]
+  resources = [for volume in aws_ebs_volume.data : volume.arn]
 }

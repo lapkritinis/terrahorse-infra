@@ -59,6 +59,15 @@ data "aws_iam_policy_document" "ec2-parameters" {
   }
 
   statement {
+    effect  = "Allow"
+    actions = ["ssm:PutParameter"]
+
+    resources = [
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/terrahorse/*/ec2/deploy/status",
+    ]
+  }
+
+  statement {
     effect    = "Allow"
     actions   = ["kms:Decrypt"]
     resources = ["*"]

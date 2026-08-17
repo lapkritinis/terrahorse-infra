@@ -28,7 +28,7 @@ data "cloudflare_zone" "terrahorse" {
   }
 }
 
-resource "random_password" "cloudflare_tunnel_secret" {
+resource "random_password" "cloudflare-tunnel-secret" {
   for_each = local.cloudflare_tunnels
 
   length  = 32
@@ -40,7 +40,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared" "terrahorse" {
 
   account_id    = var.cloudflare_account_id
   name          = each.value.name
-  tunnel_secret = base64encode(random_password.cloudflare_tunnel_secret[each.key].result)
+  tunnel_secret = base64encode(random_password.cloudflare-tunnel-secret[each.key].result)
   config_src    = "cloudflare"
 }
 
@@ -72,7 +72,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "terrahorse" {
   }
 }
 
-resource "cloudflare_dns_record" "terrahorse_tunnel" {
+resource "cloudflare_dns_record" "terrahorse-tunnel" {
   for_each = local.cloudflare_tunnels
 
   zone_id = data.cloudflare_zone.terrahorse.id
@@ -84,7 +84,7 @@ resource "cloudflare_dns_record" "terrahorse_tunnel" {
   comment = "TerraHorse ${each.key} Cloudflare Tunnel"
 }
 
-resource "cloudflare_dns_record" "terrahorse_api_tunnel" {
+resource "cloudflare_dns_record" "terrahorse-api-tunnel" {
   for_each = local.cloudflare_tunnels
 
   zone_id = data.cloudflare_zone.terrahorse.id
@@ -94,6 +94,21 @@ resource "cloudflare_dns_record" "terrahorse_api_tunnel" {
   ttl     = 1
   proxied = true
   comment = "TerraHorse ${each.key} API Cloudflare Tunnel"
+}
+
+moved {
+  from = random_password.cloudflare_tunnel_secret
+  to   = random_password.cloudflare-tunnel-secret
+}
+
+moved {
+  from = cloudflare_dns_record.terrahorse_tunnel
+  to   = cloudflare_dns_record.terrahorse-tunnel
+}
+
+moved {
+  from = cloudflare_dns_record.terrahorse_api_tunnel
+  to   = cloudflare_dns_record.terrahorse-api-tunnel
 }
 
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "terrahorse" {

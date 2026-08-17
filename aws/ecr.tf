@@ -45,3 +45,34 @@ resource "aws_ecr_lifecycle_policy" "terrahorse" {
     ]
   })
 }
+
+resource "aws_ecr_repository" "terrahorse-release" {
+  name                 = "terrahorse-release"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "terrahorse-release" {
+  repository = aws_ecr_repository.terrahorse-release.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep the newest 20 release bundles"
+      selection = {
+        tagStatus      = "tagged"
+        tagPatternList = ["release-*"]
+        countType      = "imageCountMoreThan"
+        countNumber    = 20
+      }
+      action = { type = "expire" }
+    }]
+  })
+}
