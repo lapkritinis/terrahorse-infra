@@ -133,30 +133,44 @@ metadata_token="$(curl -fsS -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 216
 region="$(curl -fsS -H "X-aws-ec2-metadata-token: $${metadata_token}" http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F'"' '/"region"/ { print $4 }')"
 registry="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$${region}.amazonaws.com"
 desired_parameter="/terrahorse/$${environment}/ec2/deploy/desired"
+deployment_parameter="/terrahorse/$${environment}/ec2/deploy/deployment"
 status_parameter="/terrahorse/$${environment}/ec2/deploy/status"
 app_dir=/opt/terrahorse/app
 release_dir=/opt/terrahorse/releases
+reconcile_lock=/run/terrahorse-reconcile.lock
+case "$${environment}" in
+  dev) runtime_environment=preview ;;
+  prod) runtime_environment=production ;;
+  *) runtime_environment="$${environment}" ;;
+esac
 
 write_status() {
-  local state="$1" release="$2" message="$3"
+  local state="$1" release="$2" deployment_id="$3" message="$4"
   local payload
-  payload="$(jq -cn --arg state "$${state}" --arg release "$${release}" --arg message "$${message}" \
-    '{state:$state,release:$release,message:$message,timestamp:(now|todateiso8601)}')"
+  payload="$(jq -cn --arg state "$${state}" --arg release "$${release}" --arg deployment_id "$${deployment_id}" --arg message "$${message}" \
+    '{state:$state,release:$release,deployment_id:$deployment_id,message:$message,timestamp:(now|todateiso8601)}')"
   aws ssm put-parameter --name "$${status_parameter}" --type String --overwrite --value "$${payload}" >/dev/null || true
 }
 
 reconcile_once() {
-  local release_image release_id candidate compose_file storefront_image
+  local release_image release_id deployment_id deployment_key candidate compose_file storefront_image app_version
   release_image="$(aws ssm get-parameter --name "$${desired_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
   [ -n "$${release_image}" ] || return 0
+  deployment_id="$(aws ssm get-parameter --name "$${deployment_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
+  [ -n "$${deployment_id}" ] || deployment_id=legacy
 
   release_id="$(printf '%s' "$${release_image}" | tr '/:@' '___')"
-  candidate="$${release_dir}/$${release_id}"
-  if [ -f "$${candidate}/.installed" ] || [ -f "$${candidate}/.rejected" ]; then
+  deployment_key="$(printf '%s' "$${deployment_id}" | tr '/:@' '___')"
+  candidate="$${release_dir}/$${release_id}--$${deployment_key}"
+  if [ -f "$${candidate}/.installed" ]; then
+    write_status succeeded "$${release_image}" "$${deployment_id}" "Release is already active"
+    return 0
+  fi
+  if [ -f "$${candidate}/.rejected" ]; then
     return 0
   fi
 
-  write_status deploying "$${release_image}" "Preparing release"
+  write_status deploying "$${release_image}" "$${deployment_id}" "Preparing release"
   docker pull "$${release_image}" >/dev/null
   rm -rf "$${candidate}.tmp"
   install -d "$${candidate}.tmp/docker/media"
@@ -168,6 +182,7 @@ reconcile_once() {
   docker rm "$${container_id}" >/dev/null
   trap - RETURN
   storefront_image="$(jq -er '.storefront_image' "$${candidate}.tmp/release.json")"
+  app_version="$(jq -er '.release' "$${candidate}.tmp/release.json")"
 
   env_file="$${candidate}.tmp/.env"
   umask 077
@@ -175,7 +190,7 @@ reconcile_once() {
   aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/config" --query Parameter.Value --output text |
     jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$${env_file}"
   printf 'STOREFRONT_IMAGE=%s\nAPP_VERSION=%s\nNUXT_PUBLIC_ENVIRONMENT=%s\n' \
-    "$${storefront_image}" "$${release_id}" "$${environment}" >> "$${env_file}"
+    "$${storefront_image}" "$${app_version}" "$${runtime_environment}" >> "$${env_file}"
   for name in SALEOR_COMMERCE_APP_TOKEN COMMERCE_EVENT_HMAC_KEY MONTONIO_ACCESS_KEY MONTONIO_SECRET_KEY CLOUDFLARED_TUNNEL_TOKEN POSTGRES_PASSWORD SECRET_KEY; do
     printf '%s=' "$${name}" >> "$${env_file}"
     aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/$${name}" --with-decryption --query Parameter.Value --output text >> "$${env_file}"
@@ -211,7 +226,7 @@ reconcile_once() {
     sleep 5
   done
   if [ "$${healthy}" != true ]; then
-    write_status rolled_back "$${release_image}" "Candidate failed health check; previous release restored"
+    write_status rolled_back "$${release_image}" "$${deployment_id}" "Candidate failed health check; previous release restored"
     if [ -d "$${rollback_dir}" ]; then
       rm -rf "$${app_dir}"
       mv "$${rollback_dir}" "$${app_dir}"
@@ -225,14 +240,30 @@ reconcile_once() {
   fi
   rm -rf "$${rollback_dir}"
   touch "$${candidate}/.installed"
-  write_status succeeded "$${release_image}" "Release is active"
+  write_status succeeded "$${release_image}" "$${deployment_id}" "Release is active"
 }
 
+reconcile_once_locked() {
+  (
+    flock -n 9 || return 0
+    reconcile_once
+  ) 9>"$${reconcile_lock}"
+}
+
+reconcile_requested=false
+trap 'reconcile_requested=true' USR1
 while true; do
-  if ! reconcile_once; then
-    write_status failed "$(aws ssm get-parameter --name "$${desired_parameter}" --query Parameter.Value --output text 2>/dev/null || true)" "Release failed; previous release remains active"
+  reconcile_requested=false
+  if ! reconcile_once_locked; then
+    failed_release="$(aws ssm get-parameter --name "$${desired_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
+    failed_deployment="$(aws ssm get-parameter --name "$${deployment_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
+    write_status failed "$${failed_release}" "$${failed_deployment:-legacy}" "Release failed; previous release remains active"
   fi
-  sleep 120
+  if [ "$${reconcile_requested}" = true ]; then
+    continue
+  fi
+  sleep 120 &
+  wait $! || true
 done
 RECONCILE
 chmod 0755 /usr/local/sbin/terrahorse-reconcile
