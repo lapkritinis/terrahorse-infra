@@ -157,7 +157,7 @@ reconcile_once() {
   release_image="$(aws ssm get-parameter --name "$${desired_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
   [ -n "$${release_image}" ] || return 0
   deployment_id="$(aws ssm get-parameter --name "$${deployment_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
-  [ -n "$${deployment_id}" ] || deployment_id=legacy
+  [ -n "$${deployment_id}" ] || return 1
 
   release_id="$(printf '%s' "$${release_image}" | tr '/:@' '___')"
   deployment_key="$(printf '%s' "$${deployment_id}" | tr '/:@' '___')"
@@ -257,7 +257,7 @@ while true; do
   if ! reconcile_once_locked; then
     failed_release="$(aws ssm get-parameter --name "$${desired_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
     failed_deployment="$(aws ssm get-parameter --name "$${deployment_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
-    write_status failed "$${failed_release}" "$${failed_deployment:-legacy}" "Release failed; previous release remains active"
+    write_status failed "$${failed_release}" "$${failed_deployment}" "Release failed; previous release remains active"
   fi
   if [ "$${reconcile_requested}" = true ]; then
     continue
