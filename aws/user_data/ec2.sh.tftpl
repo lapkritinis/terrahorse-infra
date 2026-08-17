@@ -170,43 +170,69 @@ reconcile_once() {
     return 0
   fi
   if [ -f "$${candidate}/.rejected" ]; then
-    return 0
+    write_status failed "$${release_image}" "$${deployment_id}" "Release was previously rejected"
+    return 1
   fi
 
-  docker pull "$${release_image}" >/dev/null
+  if ! docker pull "$${release_image}" >/dev/null; then
+    return 1
+  fi
   rm -rf "$${candidate}.tmp"
   install -d "$${candidate}.tmp/docker/media"
-  container_id="$(docker create "$${release_image}")"
+  if ! container_id="$(docker create "$${release_image}")"; then
+    return 1
+  fi
   trap 'docker rm -f "$${container_id}" >/dev/null 2>&1 || true' RETURN
-  docker cp "$${container_id}:/release/compose.ec2.yml" "$${candidate}.tmp/compose.ec2.yml"
-  docker cp "$${container_id}:/release/release.json" "$${candidate}.tmp/release.json"
-  docker cp "$${container_id}:/release/docker/media/nginx.conf" "$${candidate}.tmp/docker/media/nginx.conf"
-  docker rm "$${container_id}" >/dev/null
+  if ! docker cp "$${container_id}:/release/compose.ec2.yml" "$${candidate}.tmp/compose.ec2.yml" ||
+    ! docker cp "$${container_id}:/release/release.json" "$${candidate}.tmp/release.json" ||
+    ! docker cp "$${container_id}:/release/docker/media/nginx.conf" "$${candidate}.tmp/docker/media/nginx.conf"; then
+    return 1
+  fi
+  if ! docker rm "$${container_id}" >/dev/null; then
+    return 1
+  fi
   trap - RETURN
-  storefront_image="$(jq -er '.storefront_image' "$${candidate}.tmp/release.json")"
-  app_version="$(jq -er '.release' "$${candidate}.tmp/release.json")"
+  if ! storefront_image="$(jq -er '.storefront_image' "$${candidate}.tmp/release.json")" ||
+    ! app_version="$(jq -er '.release' "$${candidate}.tmp/release.json")"; then
+    return 1
+  fi
 
   env_file="$${candidate}.tmp/.env"
   umask 077
   : > "$${env_file}"
-  aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/config" --query Parameter.Value --output text |
-    jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$${env_file}"
+  if ! aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/config" --query Parameter.Value --output text |
+    jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$${env_file}"; then
+    return 1
+  fi
   printf 'STOREFRONT_IMAGE=%s\nAPP_VERSION=%s\nNUXT_PUBLIC_ENVIRONMENT=%s\n' \
     "$${storefront_image}" "$${app_version}" "$${runtime_environment}" >> "$${env_file}"
   for name in SALEOR_COMMERCE_APP_TOKEN COMMERCE_EVENT_HMAC_KEY MONTONIO_ACCESS_KEY MONTONIO_SECRET_KEY CLOUDFLARED_TUNNEL_TOKEN POSTGRES_PASSWORD SECRET_KEY; do
+    secret_value="$(aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/$${name}" --with-decryption --query Parameter.Value --output text 2>/dev/null || true)"
+    [ -n "$${secret_value}" ] || return 1
     printf '%s=' "$${name}" >> "$${env_file}"
-    aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/$${name}" --with-decryption --query Parameter.Value --output text >> "$${env_file}"
+    printf '%s' "$${secret_value}" >> "$${env_file}"
     printf '\n' >> "$${env_file}"
   done
   printf "RSA_PRIVATE_KEY='" >> "$${env_file}"
-  aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/RSA_PRIVATE_KEY" --with-decryption --query Parameter.Value --output text >> "$${env_file}"
+  rsa_private_key="$(aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/RSA_PRIVATE_KEY" --with-decryption --query Parameter.Value --output text 2>/dev/null || true)"
+  [ -n "$${rsa_private_key}" ] || return 1
+  printf '%s' "$${rsa_private_key}" >> "$${env_file}"
   printf "'\nCACHE_URL=redis://cache:6379/0\nCELERY_BROKER_URL=redis://cache:6379/1\n" >> "$${env_file}"
   chmod 0600 "$${env_file}"
 
-  aws ecr get-login-password --region "$${region}" | docker login --username AWS --password-stdin "$${registry}" >/dev/null
-  docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" config >/dev/null
-  docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" pull >/dev/null
-  docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" run --rm api python3 manage.py migrate --noinput >/dev/null
+  if ! aws ecr get-login-password --region "$${region}" |
+    docker login --username AWS --password-stdin "$${registry}" >/dev/null; then
+    return 1
+  fi
+  if ! docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" config >/dev/null; then
+    return 1
+  fi
+  if ! docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" pull >/dev/null; then
+    return 1
+  fi
+  if ! docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" run --rm api python3 manage.py migrate --noinput >/dev/null; then
+    return 1
+  fi
 
   rollback_dir="$${app_dir}.rollback"
   rm -rf "$${rollback_dir}"
