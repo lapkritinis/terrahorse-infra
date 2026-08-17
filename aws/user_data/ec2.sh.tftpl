@@ -130,6 +130,7 @@ set -euo pipefail
 
 environment="${environment}"
 metadata_token="$(curl -fsS -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token)"
+instance_id="$(curl -fsS -H "X-aws-ec2-metadata-token: $${metadata_token}" http://169.254.169.254/latest/meta-data/instance-id)"
 region="$(curl -fsS -H "X-aws-ec2-metadata-token: $${metadata_token}" http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F'"' '/"region"/ { print $4 }')"
 registry="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$${region}.amazonaws.com"
 desired_parameter="/terrahorse/$${environment}/ec2/deploy/desired"
@@ -147,8 +148,8 @@ esac
 write_status() {
   local state="$1" release="$2" deployment_id="$3" message="$4"
   local payload
-  payload="$(jq -cn --arg state "$${state}" --arg release "$${release}" --arg deployment_id "$${deployment_id}" --arg message "$${message}" \
-    '{state:$state,release:$release,deployment_id:$deployment_id,message:$message,timestamp:(now|todateiso8601)}')"
+  payload="$(jq -cn --arg state "$${state}" --arg release "$${release}" --arg deployment_id "$${deployment_id}" --arg instance_id "$${instance_id}" --arg message "$${message}" \
+    '{state:$state,release:$release,deployment_id:$deployment_id,instance_id:$instance_id,message:$message,timestamp:(now|todateiso8601)}')"
   aws ssm put-parameter --name "$${status_parameter}" --type String --overwrite --value "$${payload}" >/dev/null || true
 }
 
@@ -158,6 +159,8 @@ reconcile_once() {
   [ -n "$${release_image}" ] || return 0
   deployment_id="$(aws ssm get-parameter --name "$${deployment_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
   [ -n "$${deployment_id}" ] || return 1
+
+  write_status deploying "$${release_image}" "$${deployment_id}" "Preparing release"
 
   release_id="$(printf '%s' "$${release_image}" | tr '/:@' '___')"
   deployment_key="$(printf '%s' "$${deployment_id}" | tr '/:@' '___')"
@@ -170,7 +173,6 @@ reconcile_once() {
     return 0
   fi
 
-  write_status deploying "$${release_image}" "$${deployment_id}" "Preparing release"
   docker pull "$${release_image}" >/dev/null
   rm -rf "$${candidate}.tmp"
   install -d "$${candidate}.tmp/docker/media"
