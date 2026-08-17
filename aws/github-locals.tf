@@ -1,6 +1,10 @@
 locals {
   github_repository = "terrahorse-web"
 
+  github_repository_variables = {
+    AWS_BUILD_ROLE_ARN = aws_iam_role.github-actions.arn
+  }
+
   github_environment_variables = {
     "aws-dev" = {
       NUXT_PUBLIC_SITE_URL                   = "https://dev.terrahorse.lt"
@@ -23,6 +27,7 @@ locals {
       STOREFRONT_PUBLIC_URL                  = "https://dev.terrahorse.lt"
       SALEOR_ALLOWED_HOSTS                   = "localhost,127.0.0.1,api,dev.terrahorse.lt,api-dev.terrahorse.lt"
       SALEOR_ALLOWED_CLIENT_HOSTS            = "localhost,127.0.0.1,dev.terrahorse.lt,api-dev.terrahorse.lt"
+      AWS_DEPLOY_ROLE_ARN                    = aws_iam_role.github-actions-deploy["dev"].arn
     }
     "aws-prod" = {
       NUXT_PUBLIC_SITE_URL                   = "https://terrahorse.lt"
@@ -45,6 +50,7 @@ locals {
       STOREFRONT_PUBLIC_URL                  = "https://terrahorse.lt"
       SALEOR_ALLOWED_HOSTS                   = "localhost,127.0.0.1,api,terrahorse.lt,api.terrahorse.lt"
       SALEOR_ALLOWED_CLIENT_HOSTS            = "localhost,127.0.0.1,terrahorse.lt"
+      AWS_DEPLOY_ROLE_ARN                    = aws_iam_role.github-actions-deploy["prod"].arn
     }
   }
 

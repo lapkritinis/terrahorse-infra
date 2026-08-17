@@ -9,6 +9,14 @@ resource "github_repository_environment" "terrahorse-web" {
   environment = each.key
 }
 
+resource "github_actions_variable" "terrahorse-web" {
+  for_each = local.github_repository_variables
+
+  repository    = local.github_repository
+  variable_name = each.key
+  value         = each.value
+}
+
 resource "github_actions_environment_variable" "terrahorse-web" {
   for_each = local.github_variable_keys
 
