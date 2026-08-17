@@ -101,6 +101,7 @@ data "aws_iam_policy_document" "github-actions" {
     resources = [aws_ecr_repository.terrahorse.arn, aws_ecr_repository.terrahorse-release.arn]
 
     actions = [
+      "ecr:DescribeImages",
       "ecr:BatchGetImage",
       "ecr:BatchCheckLayerAvailability",
       "ecr:CompleteLayerUpload",
