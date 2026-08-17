@@ -10,7 +10,7 @@ locals {
       compose_file         = "/opt/terrahorse/app/compose.ec2.yml"
       min_size             = 1
       desired_capacity     = 1
-      max_size             = 2
+      max_size             = 1
     }
     prod = {
       name                 = "${local.account_name}-prod-host"

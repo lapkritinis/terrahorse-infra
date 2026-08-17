@@ -30,28 +30,21 @@ data "aws_iam_policy_document" "ecs-task-secrets" {
   statement {
     effect = "Allow"
 
-    actions = [
-      "ssm:GetParameters",
-    ]
+    actions = ["ssm:GetParameters"]
 
     resources = [for parameter in aws_ssm_parameter.cloudflared-tunnel-token : parameter.arn]
   }
 
   statement {
-    effect = "Allow"
-
-    actions = [
-      "kms:Decrypt",
-    ]
-
+    effect    = "Allow"
+    actions   = ["kms:Decrypt"]
     resources = ["*"]
   }
 }
 
 resource "aws_iam_role_policy" "ecs-task-secrets" {
-  name = "${local.account_name}-ecs-task-secrets"
-  role = aws_iam_role.ecs-task-execution.id
-
+  name   = "${local.account_name}-ecs-task-secrets"
+  role   = aws_iam_role.ecs-task-execution.id
   policy = data.aws_iam_policy_document.ecs-task-secrets.json
 }
 
@@ -89,6 +82,32 @@ data "aws_iam_policy_document" "github-actions-trust" {
   }
 }
 
+data "aws_iam_policy_document" "github-actions-deploy-trust" {
+  for_each = local.ec2_environments
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:lapkritinis/terrahorse-web:environment:aws-${each.key}"]
+    }
+  }
+}
+
 resource "aws_iam_role" "github-actions" {
   name               = "${local.account_name}-github-actions"
   assume_role_policy = data.aws_iam_policy_document.github-actions-trust.json
@@ -117,16 +136,13 @@ data "aws_iam_policy_document" "github-actions" {
     resources = ["*"]
     actions   = ["ecr:GetAuthorizationToken"]
   }
+}
+
+data "aws_iam_policy_document" "github-actions-deploy" {
+  for_each = local.ec2_environments
 
   statement {
-    sid       = "Ec2Discovery"
-    effect    = "Allow"
-    resources = ["*"]
-    actions   = ["ec2:DescribeInstances"]
-  }
-
-  statement {
-    sid       = "SsmDeploy"
+    sid       = "SsmDeployDocument"
     effect    = "Allow"
     resources = ["arn:aws:ssm:${data.aws_region.current.region}::document/AWS-RunShellScript"]
     actions   = ["ssm:SendCommand"]
@@ -136,13 +152,12 @@ data "aws_iam_policy_document" "github-actions" {
     sid       = "SsmDeployToTerraHorseHost"
     effect    = "Allow"
     resources = ["arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:instance/*"]
-
-    actions = ["ssm:SendCommand"]
+    actions   = ["ssm:SendCommand"]
 
     condition {
       test     = "StringEquals"
       variable = "ssm:resourceTag/Name"
-      values   = [for environment in local.ec2_environments : environment.name]
+      values   = [local.ec2_environments[each.key].name]
     }
   }
 
@@ -150,58 +165,21 @@ data "aws_iam_policy_document" "github-actions" {
     sid       = "SsmCommandStatus"
     effect    = "Allow"
     resources = ["*"]
-
-    actions = [
-      "ssm:GetCommandInvocation",
-      "ssm:ListCommandInvocations",
-    ]
+    actions   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
   }
 
   statement {
-    sid    = "Ec2DeploymentStatus"
-    effect = "Allow"
-    resources = [
-      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/terrahorse/*/ec2/deploy/status",
-    ]
-    actions = ["ssm:GetParameter"]
-  }
-
-  statement {
-    sid    = "Ec2RuntimeParameterSync"
-    effect = "Allow"
-    resources = [
-      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/terrahorse/*",
-    ]
-
-    actions = ["ssm:PutParameter"]
-  }
-
-  statement {
-    sid       = "EcsDeploy"
+    sid       = "Ec2DeploymentStatus"
     effect    = "Allow"
-    resources = ["*"]
-
-    actions = [
-      "ecs:DescribeServices",
-      "ecs:DescribeTaskDefinition",
-      "ecs:DescribeTasks",
-      "ecs:ListTasks",
-      "ecs:RegisterTaskDefinition",
-      "ecs:UpdateService",
-    ]
+    resources = ["arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/terrahorse/${each.key}/ec2/deploy/status"]
+    actions   = ["ssm:GetParameter"]
   }
 
   statement {
-    sid       = "PassEcsRoles"
+    sid       = "Ec2RuntimeParameterSync"
     effect    = "Allow"
-    resources = [aws_iam_role.ecs-task.arn, aws_iam_role.ecs-task-execution.arn]
-    actions   = ["iam:PassRole"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "iam:PassedToService"
-      values   = ["ecs-tasks.amazonaws.com"]
-    }
+    resources = ["arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/terrahorse/${each.key}/ec2/*"]
+    actions   = ["ssm:PutParameter"]
   }
 }
 
@@ -213,4 +191,17 @@ resource "aws_iam_policy" "github-actions" {
 resource "aws_iam_role_policy_attachment" "github-actions" {
   role       = aws_iam_role.github-actions.name
   policy_arn = aws_iam_policy.github-actions.arn
+}
+
+resource "aws_iam_role" "github-actions-deploy" {
+  for_each           = local.ec2_environments
+  name               = "${local.account_name}-github-actions-deploy-${each.key}"
+  assume_role_policy = data.aws_iam_policy_document.github-actions-deploy-trust[each.key].json
+}
+
+resource "aws_iam_role_policy" "github-actions-deploy" {
+  for_each = local.ec2_environments
+  name     = "${local.account_name}-github-actions-deploy-${each.key}"
+  role     = aws_iam_role.github-actions-deploy[each.key].id
+  policy   = data.aws_iam_policy_document.github-actions-deploy[each.key].json
 }

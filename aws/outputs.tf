@@ -19,9 +19,14 @@ output "ecs_deploy_targets" {
   }
 }
 
-output "github_actions_role_arn" {
-  description = "IAM role assumed by GitHub Actions through OIDC"
+output "github_actions_build_role_arn" {
+  description = "IAM role used by GitHub Actions to build and publish images"
   value       = aws_iam_role.github-actions.arn
+}
+
+output "github_actions_deploy_role_arns" {
+  description = "Environment-scoped IAM roles used by GitHub Actions deployments"
+  value       = { for environment, role in aws_iam_role.github-actions-deploy : environment => role.arn }
 }
 
 output "ec2_autoscaling_group_name" {
