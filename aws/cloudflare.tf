@@ -58,6 +58,11 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "terrahorse" {
       },
       {
         hostname = each.value.api_hostname
+        path     = "/media/.*"
+        service  = "http://localhost:8080"
+      },
+      {
+        hostname = each.value.api_hostname
         service  = "http://localhost:8000"
       },
       {
