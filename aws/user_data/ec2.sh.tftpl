@@ -13,12 +13,8 @@ log() {
 
 log "Docker and Docker Compose installation completed"
 
-cat > /etc/sysctl.d/99-terrahorse-cloudflared.conf <<'SYSCTL'
-net.core.rmem_max=7500000
-net.core.rmem_default=7500000
-SYSCTL
-sysctl --system >/dev/null
-log "Cloudflared UDP receive buffer settings applied"
+sysctl -w net.core.rmem_max=7500000
+sysctl -w net.core.rmem_default=7500000
 
 systemctl enable docker
 usermod -aG docker ec2-user
@@ -162,11 +158,17 @@ ensure_internal_tls() {
   local temporary_key="$${key_path}.tmp"
 
   install -d -m 0700 "$${tls_dir}"
-  if [ -s "$${certificate_path}" ] && [ -s "$${key_path}" ] && \
-    openssl x509 -in "$${certificate_path}" -noout >/dev/null 2>&1; then
+  if [ -e "$${certificate_path}" ] || [ -e "$${key_path}" ]; then
+    [ -f "$${certificate_path}" ] && [ -f "$${key_path}" ] || {
+      echo "Internal TLS certificate and key must both be regular files" >&2
+      return 1
+    }
+    openssl x509 -in "$${certificate_path}" -noout >/dev/null 2>&1 || {
+      echo "Internal TLS certificate is invalid" >&2
+      return 1
+    }
     return 0
   fi
-
   rm -f "$${temporary_certificate}" "$${temporary_key}"
   umask 077
   openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
@@ -261,7 +263,10 @@ reconcile_once() {
   systemctl restart terrahorse.service
   healthy=false
   for attempt in $(seq 1 12); do
-    if curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1; then
+    if curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1 && \
+      curl -ksSf https://127.0.0.1:8443/graphql/ \
+        -H 'Content-Type: application/json' \
+        --data '{"query":"{ __typename }"}' >/dev/null 2>&1; then
       healthy=true
       break
     fi
