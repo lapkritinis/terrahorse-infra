@@ -1,0 +1,364 @@
+#!/bin/bash
+set -euo pipefail
+
+dnf install -y awscli-2 docker jq openssl util-linux xfsprogs
+install -d -m 0755 /usr/local/lib/docker/cli-plugins
+curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+log() {
+  echo "$(date --iso-8601=seconds) [terrahorse-bootstrap] $*"
+}
+
+log "Docker and Docker Compose installation completed"
+
+sysctl -w net.core.rmem_max=7500000
+sysctl -w net.core.rmem_default=7500000
+
+systemctl enable docker
+usermod -aG docker ec2-user
+
+mkdir -p /opt/terrahorse/app /opt/terrahorse/data
+
+metadata_token=$(curl -fsS -X PUT \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
+  http://169.254.169.254/latest/api/token)
+instance_id=$(curl -fsS \
+  -H "X-aws-ec2-metadata-token: $${metadata_token}" \
+  http://169.254.169.254/latest/meta-data/instance-id)
+aws_region=$(curl -fsS \
+  -H "X-aws-ec2-metadata-token: $${metadata_token}" \
+  http://169.254.169.254/latest/dynamic/instance-identity/document | \
+  awk -F'"' '/"region"/ { print $4 }')
+
+log "Waiting for data volume ${data_volume_id} to attach to instance $${instance_id}"
+last_volume_status=""
+volume_check=0
+while true; do
+  volume_check=$((volume_check + 1))
+  volume_state=$(aws ec2 describe-volumes \
+    --region "$${aws_region}" \
+    --volume-ids "${data_volume_id}" \
+    --query 'Volumes[0].State' \
+    --output text 2>/dev/null || true)
+  attached_instance_id=$(aws ec2 describe-volumes \
+    --region "$${aws_region}" \
+    --volume-ids "${data_volume_id}" \
+    --query 'Volumes[0].Attachments[0].InstanceId' \
+    --output text 2>/dev/null || true)
+
+  volume_status="$${volume_state}/$${attached_instance_id}"
+  if [ "$${volume_status}" != "$${last_volume_status}" ] || [ $((volume_check % 4)) -eq 0 ]; then
+    log "Data volume check: state=$${volume_state}, attached_instance=$${attached_instance_id}"
+    last_volume_status="$${volume_status}"
+  fi
+
+  if [ "$${volume_state}" = "available" ]; then
+    log "Attaching data volume ${data_volume_id}"
+    aws ec2 attach-volume \
+      --region "$${aws_region}" \
+      --volume-id "${data_volume_id}" \
+      --instance-id "$${instance_id}" \
+      --device /dev/sdf >/dev/null 2>&1 || true
+  elif [ "$${volume_state}" = "in-use" ] && [ "$${attached_instance_id}" = "$${instance_id}" ]; then
+    log "Data volume is attached to this instance"
+    break
+  fi
+
+  sleep 15
+done
+
+data_volume_id_for_device="${data_volume_id}"
+data_volume_id_without_hyphen="$${data_volume_id_for_device//-/}"
+data_device="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${data_volume_id_without_hyphen}"
+log "Waiting for data device $${data_device}"
+device_check=0
+while [ ! -e "$${data_device}" ]; do
+  device_check=$((device_check + 1))
+  if [ $((device_check % 12)) -eq 0 ]; then
+    log "Still waiting for data device $${data_device}"
+  fi
+  sleep 5
+done
+log "Found data device $${data_device}"
+
+if ! blkid "$${data_device}" >/dev/null 2>&1; then
+  log "Data device has no filesystem, creating XFS filesystem"
+  mkfs.xfs "$${data_device}"
+fi
+
+if ! mountpoint -q /opt/terrahorse/data; then
+  log "Mounting $${data_device} at /opt/terrahorse/data"
+  mount "$${data_device}" /opt/terrahorse/data
+fi
+log "Data volume is mounted at /opt/terrahorse/data"
+
+if ! grep -q "${data_volume_id} /opt/terrahorse/data" /etc/fstab; then
+  echo "$${data_device} /opt/terrahorse/data xfs defaults,nofail 0 2" >> /etc/fstab
+fi
+
+mkdir -p \
+  /opt/terrahorse/data/media \
+  /opt/terrahorse/data/postgres \
+  /opt/terrahorse/data/redis \
+  /opt/terrahorse/data/tls
+
+systemctl start docker
+
+aws_account_id=$(aws sts get-caller-identity \
+  --query Account \
+  --output text)
+ecr_registry="$${aws_account_id}.dkr.ecr.$${aws_region}.amazonaws.com"
+until aws ecr get-login-password --region "$${aws_region}" | \
+  docker login --username AWS --password-stdin "$${ecr_registry}"; do
+  sleep 15
+done
+
+chown -R ec2-user:ec2-user /opt/terrahorse
+chown 70:70 /opt/terrahorse/data/postgres
+chmod 0700 /opt/terrahorse/data/postgres
+
+install -d -m 0755 /opt/terrahorse/releases
+
+cat > /usr/local/sbin/terrahorse-reconcile <<'RECONCILE'
+#!/bin/bash
+set -euo pipefail
+
+environment="${environment}"
+metadata_token="$(curl -fsS -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token)"
+instance_id="$(curl -fsS -H "X-aws-ec2-metadata-token: $${metadata_token}" http://169.254.169.254/latest/meta-data/instance-id)"
+region="$(curl -fsS -H "X-aws-ec2-metadata-token: $${metadata_token}" http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F'"' '/"region"/ { print $4 }')"
+registry="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$${region}.amazonaws.com"
+desired_parameter="/terrahorse/$${environment}/ec2/deploy/desired"
+deployment_parameter="/terrahorse/$${environment}/ec2/deploy/deployment"
+status_parameter="/terrahorse/$${environment}/ec2/deploy/status"
+app_dir=/opt/terrahorse/app
+release_dir=/opt/terrahorse/releases
+tls_dir=/opt/terrahorse/data/tls
+reconcile_lock=/run/terrahorse-reconcile.lock
+case "$${environment}" in
+  dev) runtime_environment=preview ;;
+  prod) runtime_environment=production ;;
+  *) runtime_environment="$${environment}" ;;
+esac
+
+write_status() {
+  local state="$1" release="$2" deployment_id="$3" message="$4"
+  local payload
+  payload="$(jq -cn --arg state "$${state}" --arg release "$${release}" --arg deployment_id "$${deployment_id}" --arg instance_id "$${instance_id}" --arg message "$${message}" \
+    '{state:$state,release:$release,deployment_id:$deployment_id,instance_id:$instance_id,message:$message,timestamp:(now|todateiso8601)}')"
+  aws ssm put-parameter --name "$${status_parameter}" --type String --overwrite --value "$${payload}" >/dev/null || true
+}
+
+ensure_internal_tls() {
+  local certificate_path="$${tls_dir}/api.crt"
+  local key_path="$${tls_dir}/api.key"
+  local temporary_certificate="$${certificate_path}.tmp"
+  local temporary_key="$${key_path}.tmp"
+
+  install -d -m 0700 "$${tls_dir}"
+  if [ -e "$${certificate_path}" ] || [ -e "$${key_path}" ]; then
+    [ -f "$${certificate_path}" ] && [ -f "$${key_path}" ] || {
+      echo "Internal TLS certificate and key must both be regular files" >&2
+      return 1
+    }
+    openssl x509 -in "$${certificate_path}" -noout >/dev/null 2>&1 || {
+      echo "Internal TLS certificate is invalid" >&2
+      return 1
+    }
+    return 0
+  fi
+  rm -f "$${temporary_certificate}" "$${temporary_key}"
+  umask 077
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
+    -keyout "$${temporary_key}" \
+    -out "$${temporary_certificate}" \
+    -subj '/CN=api' \
+    -addext 'subjectAltName=DNS:api,DNS:localhost,IP:127.0.0.1'
+  chmod 0600 "$${temporary_key}"
+  chmod 0644 "$${temporary_certificate}"
+  mv -f "$${temporary_key}" "$${key_path}"
+  mv -f "$${temporary_certificate}" "$${certificate_path}"
+}
+
+reconcile_once() {
+  local release_image release_id deployment_id deployment_key candidate compose_file storefront_image app_version
+  release_image="$(aws ssm get-parameter --name "$${desired_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
+  [ -n "$${release_image}" ] || return 0
+  deployment_id="$(aws ssm get-parameter --name "$${deployment_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
+  [ -n "$${deployment_id}" ] || return 1
+
+  write_status deploying "$${release_image}" "$${deployment_id}" "Preparing release"
+
+  release_id="$(printf '%s' "$${release_image}" | tr '/:@' '___')"
+  deployment_key="$(printf '%s' "$${deployment_id}" | tr '/:@' '___')"
+  candidate="$${release_dir}/$${release_id}--$${deployment_key}"
+  if [ -f "$${candidate}/.installed" ]; then
+    write_status succeeded "$${release_image}" "$${deployment_id}" "Release is already active"
+    return 0
+  fi
+  if [ -f "$${candidate}/.rejected" ]; then
+    write_status failed "$${release_image}" "$${deployment_id}" "Release was previously rejected"
+    return 1
+  fi
+
+  docker pull "$${release_image}" >/dev/null
+  rm -rf "$${candidate}.tmp"
+  install -d "$${candidate}.tmp/docker/media"
+  container_id="$(docker create "$${release_image}")"
+  trap 'docker rm -f "$${container_id}" >/dev/null 2>&1 || true' RETURN
+  docker cp "$${container_id}:/release/compose.ec2.yml" "$${candidate}.tmp/compose.ec2.yml"
+  docker cp "$${container_id}:/release/release.json" "$${candidate}.tmp/release.json"
+  docker cp "$${container_id}:/release/docker/media/nginx.conf" "$${candidate}.tmp/docker/media/nginx.conf"
+  docker rm "$${container_id}" >/dev/null
+  trap - RETURN
+  storefront_image="$(jq -er '.storefront_image' "$${candidate}.tmp/release.json")"
+  app_version="$(jq -er '.release' "$${candidate}.tmp/release.json")"
+
+  env_file="$${candidate}.tmp/.env"
+  umask 077
+  : > "$${env_file}"
+  aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/config" --query Parameter.Value --output text |
+    jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$${env_file}"
+  printf 'STOREFRONT_IMAGE=%s\nAPP_VERSION=%s\nNUXT_PUBLIC_ENVIRONMENT=%s\n' \
+    "$${storefront_image}" "$${app_version}" "$${runtime_environment}" >> "$${env_file}"
+  for name in SALEOR_COMMERCE_APP_TOKEN COMMERCE_EVENT_HMAC_KEY MONTONIO_ACCESS_KEY MONTONIO_SECRET_KEY CLOUDFLARED_TUNNEL_TOKEN POSTGRES_PASSWORD SECRET_KEY; do
+    printf '%s=' "$${name}" >> "$${env_file}"
+    aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/$${name}" --with-decryption --query Parameter.Value --output text >> "$${env_file}"
+    printf '\n' >> "$${env_file}"
+  done
+  printf "RSA_PRIVATE_KEY='" >> "$${env_file}"
+  aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/RSA_PRIVATE_KEY" --with-decryption --query Parameter.Value --output text >> "$${env_file}"
+  printf "'\nCACHE_URL=redis://cache:6379/0\nCELERY_BROKER_URL=redis://cache:6379/1\n" >> "$${env_file}"
+  chmod 0600 "$${env_file}"
+  ensure_internal_tls
+
+  aws ecr get-login-password --region "$${region}" |
+    docker login --username AWS --password-stdin "$${registry}" >/dev/null
+  docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" config >/dev/null
+  docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" pull >/dev/null
+  docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" up -d db cache >/dev/null
+  database_ready=false
+  for attempt in $(seq 1 30); do
+    if docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" exec -T db pg_isready -U saleor -d saleor >/dev/null 2>&1; then
+      database_ready=true
+      break
+    fi
+    sleep 2
+  done
+  [ "$${database_ready}" = true ]
+  docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" run --rm api python3 manage.py migrate --noinput >/dev/null
+
+  rollback_dir="$${app_dir}.rollback"
+  rm -rf "$${rollback_dir}"
+  if [ -f "$${app_dir}/compose.ec2.yml" ]; then
+    cp -a "$${app_dir}" "$${rollback_dir}"
+  fi
+  rm -rf "$${candidate}"
+  mv "$${candidate}.tmp" "$${candidate}"
+  cp "$${candidate}/compose.ec2.yml" "$${app_dir}/compose.ec2.yml"
+  cp "$${candidate}/.env" "$${app_dir}/.env"
+  install -D -m 0644 "$${candidate}/docker/media/nginx.conf" "$${app_dir}/docker/media/nginx.conf"
+  systemctl restart terrahorse.service
+  healthy=false
+  for attempt in $(seq 1 12); do
+    if curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1 && \
+      curl -ksSf https://127.0.0.1:8443/graphql/ \
+        -H 'Content-Type: application/json' \
+        --data '{"query":"{ __typename }"}' >/dev/null 2>&1; then
+      healthy=true
+      break
+    fi
+    sleep 5
+  done
+  if [ "$${healthy}" != true ]; then
+    write_status rolled_back "$${release_image}" "$${deployment_id}" "Candidate failed health check; previous release restored"
+    if [ -d "$${rollback_dir}" ]; then
+      rm -rf "$${app_dir}"
+      mv "$${rollback_dir}" "$${app_dir}"
+      systemctl restart terrahorse.service || true
+    else
+      rm -rf "$${app_dir}"
+      mkdir -p "$${app_dir}"
+    fi
+    touch "$${candidate}/.rejected"
+    return 0
+  fi
+  rm -rf "$${rollback_dir}"
+  touch "$${candidate}/.installed"
+  write_status succeeded "$${release_image}" "$${deployment_id}" "Release is active"
+}
+
+reconcile_once_locked() {
+  (
+    flock -n 9 || return 0
+    reconcile_once
+  ) 9>"$${reconcile_lock}"
+}
+
+if [ "$${1:-}" = --once ]; then
+  reconcile_once_locked
+  exit $?
+fi
+
+reconcile_requested=false
+trap 'reconcile_requested=true' USR1
+while true; do
+  reconcile_requested=false
+  if /usr/local/sbin/terrahorse-reconcile --once; then
+    :
+  else
+    failed_release="$(aws ssm get-parameter --name "$${desired_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
+    failed_deployment="$(aws ssm get-parameter --name "$${deployment_parameter}" --query Parameter.Value --output text 2>/dev/null || true)"
+    write_status failed "$${failed_release}" "$${failed_deployment}" "Release failed; previous release remains active"
+  fi
+  if [ "$${reconcile_requested}" = true ]; then
+    continue
+  fi
+  sleep 120 &
+  wait $! || true
+done
+RECONCILE
+chmod 0755 /usr/local/sbin/terrahorse-reconcile
+
+cat > /etc/systemd/system/terrahorse.service <<'SERVICE'
+[Unit]
+Description=TerraHorse Docker Compose stack
+Requires=docker.service opt-terrahorse-data.mount
+After=docker.service opt-terrahorse-data.mount network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/terrahorse/app
+ExecStartPre=/usr/bin/test -f ${compose_file}
+ExecStart=/usr/bin/docker compose -f ${compose_file} up
+ExecStop=/usr/bin/docker compose -f ${compose_file} down
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+cat > /etc/systemd/system/terrahorse-reconciler.service <<'SERVICE'
+[Unit]
+Description=TerraHorse release reconciler
+Requires=network-online.target docker.service opt-terrahorse-data.mount
+After=network-online.target docker.service opt-terrahorse-data.mount
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/terrahorse-reconcile
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable terrahorse.service
+systemctl enable --now terrahorse-reconciler.service
