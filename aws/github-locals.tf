@@ -4,7 +4,7 @@ locals {
   github_environment_variables = {
     "aws-dev" = {
       NUXT_PUBLIC_SITE_URL                   = "https://dev.terrahorse.lt"
-      SALEOR_API_URL                         = "https://api-dev.terrahorse.lt/graphql/"
+      SALEOR_API_URL                         = "http://api:8000/graphql/"
       SALEOR_CHANNEL                         = "terrahorse-eur"
       SALEOR_STOCK_AVAILABILITY_MODE         = "channel-aggregate"
       SALEOR_STOCK_COUNTRY_CODE              = "LT"
@@ -23,7 +23,7 @@ locals {
     }
     "aws-prod" = {
       NUXT_PUBLIC_SITE_URL                   = "https://terrahorse.lt"
-      SALEOR_API_URL                         = "https://api.terrahorse.lt/graphql/"
+      SALEOR_API_URL                         = "http://api:8000/graphql/"
       SALEOR_CHANNEL                         = "terrahorse-eur"
       SALEOR_STOCK_AVAILABILITY_MODE         = "channel-aggregate"
       SALEOR_STOCK_COUNTRY_CODE              = "LT"

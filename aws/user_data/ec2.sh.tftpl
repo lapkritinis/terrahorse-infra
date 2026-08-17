@@ -119,6 +119,8 @@ until aws ecr get-login-password --region "$${aws_region}" | \
 done
 
 chown -R ec2-user:ec2-user /opt/terrahorse
+chown 70:70 /opt/terrahorse/data/postgres
+chmod 0700 /opt/terrahorse/data/postgres
 
 install -d -m 0755 /opt/terrahorse/releases
 
