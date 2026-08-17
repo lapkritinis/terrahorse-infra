@@ -172,8 +172,8 @@ reconcile_once() {
   : > "$${env_file}"
   aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/config" --query Parameter.Value --output text |
     jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$${env_file}"
-  printf 'STOREFRONT_IMAGE=%s\nAPP_VERSION=%s\nNUXT_PUBLIC_ENVIRONMENT=%s\nSALEOR_ENV_FILE=%s\n' \
-    "$${storefront_image}" "$${release_id}" "$${environment}" "$${env_file}" >> "$${env_file}"
+  printf 'STOREFRONT_IMAGE=%s\nAPP_VERSION=%s\nNUXT_PUBLIC_ENVIRONMENT=%s\n' \
+    "$${storefront_image}" "$${release_id}" "$${environment}" >> "$${env_file}"
   for name in SALEOR_COMMERCE_APP_TOKEN COMMERCE_EVENT_HMAC_KEY MONTONIO_ACCESS_KEY MONTONIO_SECRET_KEY CLOUDFLARED_TUNNEL_TOKEN POSTGRES_PASSWORD SECRET_KEY; do
     printf '%s=' "$${name}" >> "$${env_file}"
     aws ssm get-parameter --name "/terrahorse/$${environment}/ec2/$${name}" --with-decryption --query Parameter.Value --output text >> "$${env_file}"
@@ -210,10 +210,13 @@ reconcile_once() {
   done
   if [ "$${healthy}" != true ]; then
     write_status rolled_back "$${release_image}" "Candidate failed health check; previous release restored"
-    rm -rf "$${app_dir}"
     if [ -d "$${rollback_dir}" ]; then
+      rm -rf "$${app_dir}"
       mv "$${rollback_dir}" "$${app_dir}"
       systemctl restart terrahorse.service || true
+    else
+      rm -rf "$${app_dir}"
+      mkdir -p "$${app_dir}"
     fi
     touch "$${candidate}/.rejected"
     return 0
