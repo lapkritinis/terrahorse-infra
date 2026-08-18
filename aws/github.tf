@@ -1,5 +1,5 @@
 provider "github" {
-  owner = "lapkritinis"
+  owner = local.github_owner
 }
 
 data "github_user" "production_deployment_reviewer" {

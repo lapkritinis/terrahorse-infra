@@ -77,7 +77,7 @@ data "aws_iam_policy_document" "github-actions-trust" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:lapkritinis/terrahorse-web:*"]
+      values   = ["${local.github_oidc_subject_prefix}:ref:refs/heads/*"]
     }
   }
 }
@@ -103,7 +103,7 @@ data "aws_iam_policy_document" "github-actions-deploy-trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:lapkritinis/terrahorse-web:environment:aws-${each.key}"]
+      values   = ["${local.github_oidc_subject_prefix}:environment:aws-${each.key}"]
     }
   }
 }
