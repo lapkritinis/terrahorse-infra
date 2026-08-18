@@ -142,6 +142,13 @@ data "aws_iam_policy_document" "github-actions-deploy" {
   for_each = local.ec2_environments
 
   statement {
+    sid       = "Ec2FindDeploymentHost"
+    effect    = "Allow"
+    resources = ["*"]
+    actions   = ["ec2:DescribeInstances"]
+  }
+
+  statement {
     sid       = "SsmDeployDocument"
     effect    = "Allow"
     resources = ["arn:aws:ssm:${data.aws_region.current.region}::document/AWS-RunShellScript"]

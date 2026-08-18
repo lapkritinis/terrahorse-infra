@@ -2,11 +2,39 @@ provider "github" {
   owner = "lapkritinis"
 }
 
+data "github_user" "production_deployment_reviewer" {
+  username = "lapkritinis"
+}
+
 resource "github_repository_environment" "terrahorse-web" {
   for_each = local.github_environments
 
-  repository  = local.github_repository
-  environment = each.key
+  repository          = local.github_repository
+  environment         = each.key
+  can_admins_bypass   = each.key != "aws-prod"
+  prevent_self_review = false
+
+  dynamic "reviewers" {
+    for_each = each.key == "aws-prod" ? [data.github_user.production_deployment_reviewer.id] : []
+
+    content {
+      users = [reviewers.value]
+    }
+  }
+}
+
+resource "github_branch_protection" "terrahorse-web-main" {
+  repository_id  = local.github_repository
+  pattern        = "main"
+  enforce_admins = true
+
+  required_status_checks {
+    strict = true
+    contexts = [
+      "Application",
+      "Runtime image",
+    ]
+  }
 }
 
 resource "github_actions_variable" "terrahorse-web" {

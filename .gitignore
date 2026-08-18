@@ -12,6 +12,19 @@
 *.json
 !package.json
 
+# Terraform generated files and local state
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+*.tfplan.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
 # Cloudflare named-tunnel material
 cloudflared/
 tunnel/
@@ -25,3 +38,6 @@ test-results/
 
 # Finder metadata
 .DS_Store
+
+# Local IDE settings
+.idea/

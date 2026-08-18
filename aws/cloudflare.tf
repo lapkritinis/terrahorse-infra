@@ -34,6 +34,12 @@ data "cloudflare_zone" "terrahorse" {
   }
 }
 
+resource "cloudflare_zone_setting" "brotli" {
+  zone_id    = data.cloudflare_zone.terrahorse.id
+  setting_id = "brotli"
+  value      = "on"
+}
+
 resource "random_password" "cloudflare-tunnel-secret" {
   for_each = local.cloudflare_tunnels
 

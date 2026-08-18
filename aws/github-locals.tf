@@ -2,7 +2,8 @@ locals {
   github_repository = "terrahorse-web"
 
   github_repository_variables = {
-    AWS_BUILD_ROLE_ARN = aws_iam_role.github-actions.arn
+    AWS_BUILD_ROLE_ARN  = aws_iam_role.github-actions.arn
+    PROD_DEPLOY_ENABLED = "false"
   }
 
   github_environment_variables = {
