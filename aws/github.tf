@@ -2,23 +2,18 @@ provider "github" {
   owner = local.github_owner
 }
 
-data "github_user" "production_deployment_reviewer" {
-  username = "lapkritinis"
-}
-
 resource "github_repository_environment" "terrahorse-web" {
   for_each = local.github_environments
 
-  repository          = local.github_repository
-  environment         = each.key
-  can_admins_bypass   = each.key != "aws-prod"
-  prevent_self_review = false
+  repository  = local.github_repository
+  environment = each.key
 
-  dynamic "reviewers" {
-    for_each = each.key == "aws-prod" ? [data.github_user.production_deployment_reviewer.id] : []
+  dynamic "deployment_branch_policy" {
+    for_each = each.key == "aws-prod" ? [true] : []
 
     content {
-      users = [reviewers.value]
+      protected_branches     = true
+      custom_branch_policies = false
     }
   }
 }
@@ -33,6 +28,20 @@ resource "github_branch_protection" "terrahorse-web-main" {
     contexts = [
       "Application",
       "Runtime image",
+    ]
+  }
+}
+
+resource "github_branch_protection" "terrahorse-infra-main" {
+  repository_id  = local.github_infrastructure_repository
+  pattern        = "main"
+  enforce_admins = true
+
+  required_status_checks {
+    strict = true
+    contexts = [
+      "syntax",
+      "validate",
     ]
   }
 }

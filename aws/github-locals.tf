@@ -1,9 +1,10 @@
 locals {
-  github_owner               = "ruduo-net"
-  github_owner_id            = 166593019
-  github_repository          = "terrahorse-web"
-  github_repository_id       = 1297533275
-  github_oidc_subject_prefix = "repo:${local.github_owner}@${local.github_owner_id}/${local.github_repository}@${local.github_repository_id}"
+  github_owner                     = "ruduo-net"
+  github_owner_id                  = 166593019
+  github_repository                = "terrahorse-web"
+  github_repository_id             = 1297533275
+  github_infrastructure_repository = "terrahorse-infra"
+  github_oidc_subject_prefix       = "repo:${local.github_owner}@${local.github_owner_id}/${local.github_repository}@${local.github_repository_id}"
 
   github_repository_variables = {
     AWS_BUILD_ROLE_ARN  = aws_iam_role.github-actions.arn
