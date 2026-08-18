@@ -1,5 +1,5 @@
 provider "github" {
-  owner = "lapkritinis"
+  owner = local.github_owner
 }
 
 resource "github_repository_environment" "terrahorse-web" {
@@ -7,6 +7,43 @@ resource "github_repository_environment" "terrahorse-web" {
 
   repository  = local.github_repository
   environment = each.key
+
+  dynamic "deployment_branch_policy" {
+    for_each = each.key == "aws-prod" ? [true] : []
+
+    content {
+      protected_branches     = true
+      custom_branch_policies = false
+    }
+  }
+}
+
+resource "github_branch_protection" "terrahorse-web-main" {
+  repository_id  = local.github_repository
+  pattern        = "main"
+  enforce_admins = true
+
+  required_status_checks {
+    strict = true
+    contexts = [
+      "Application",
+      "Runtime image",
+    ]
+  }
+}
+
+resource "github_branch_protection" "terrahorse-infra-main" {
+  repository_id  = local.github_infrastructure_repository
+  pattern        = "main"
+  enforce_admins = true
+
+  required_status_checks {
+    strict = true
+    contexts = [
+      "syntax",
+      "validate",
+    ]
+  }
 }
 
 resource "github_actions_variable" "terrahorse-web" {
