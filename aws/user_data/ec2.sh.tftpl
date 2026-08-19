@@ -151,6 +151,11 @@ write_status() {
   aws ssm put-parameter --name "$${status_parameter}" --type String --overwrite --value "$${payload}" >/dev/null || true
 }
 
+ensure_ecr_login() {
+  aws ecr get-login-password --region "$${region}" |
+    docker login --username AWS --password-stdin "$${registry}" >/dev/null
+}
+
 ensure_internal_tls() {
   local certificate_path="$${tls_dir}/api.crt"
   local key_path="$${tls_dir}/api.key"
@@ -203,7 +208,11 @@ reconcile_once() {
     return 1
   fi
 
-  docker pull "$${release_image}" >/dev/null
+  ensure_ecr_login
+  if ! docker pull "$${release_image}" >/dev/null; then
+    ensure_ecr_login
+    docker pull "$${release_image}" >/dev/null
+  fi
   rm -rf "$${candidate}.tmp"
   install -d "$${candidate}.tmp/docker/media"
   container_id="$(docker create "$${release_image}")"
@@ -234,8 +243,7 @@ reconcile_once() {
   chmod 0600 "$${env_file}"
   ensure_internal_tls
 
-  aws ecr get-login-password --region "$${region}" |
-    docker login --username AWS --password-stdin "$${registry}" >/dev/null
+  ensure_ecr_login
   docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" config >/dev/null
   docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" pull >/dev/null
   docker compose --env-file "$${env_file}" -f "$${candidate}.tmp/compose.ec2.yml" up -d db cache >/dev/null
